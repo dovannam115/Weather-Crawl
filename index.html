@@ -823,24 +823,22 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
               <div><div class="card-title">Data Resolution</div><div class="card-desc">Select one or both</div></div>
             </div>
             <div class="card-body" style="display:flex;gap:10px">
-              <label class="type-toggle-card" style="flex:1">
-                <input type="checkbox" id="chkHourly" checked style="display:none">
+              <div class="type-toggle-card" id="toggleHourly" style="flex:1" onclick="toggleDataType('hourly')">
                 <div class="ttc-inner active" id="ttcHourly">
                   <div class="ttc-check" id="ttcCheckH">✓</div>
                   <div class="ttc-icon">⏱</div>
                   <div class="ttc-label">Hourly</div>
                   <div class="ttc-desc">24 pts/day</div>
                 </div>
-              </label>
-              <label class="type-toggle-card" style="flex:1">
-                <input type="checkbox" id="chkDaily" style="display:none">
+              </div>
+              <div class="type-toggle-card" id="toggleDaily" style="flex:1" onclick="toggleDataType('daily')">
                 <div class="ttc-inner" id="ttcDaily">
                   <div class="ttc-check" id="ttcCheckD" style="opacity:0">✓</div>
                   <div class="ttc-icon">📅</div>
                   <div class="ttc-label">Daily</div>
                   <div class="ttc-desc">1 pt/day</div>
                 </div>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -1287,22 +1285,18 @@ function switchMetricTab(tab) {
 }
 
 // ─── Data type toggles ────────────────────────────────────────────────────────
-document.getElementById('toggleHourly').addEventListener('click', function(e){
-  if(e.target.tagName==='INPUT') return;
-  const chk = document.getElementById('chkHourly');
+function toggleDataType(type) {
+  const chk = document.getElementById(type === 'hourly' ? 'chkHourly' : 'chkDaily');
   chk.checked = !chk.checked;
-  document.getElementById('ttcHourly').classList.toggle('active',chk.checked);
-  document.getElementById('ttcCheckH').style.opacity = chk.checked?'1':'0';
+  if (type === 'hourly') {
+    document.getElementById('ttcHourly').classList.toggle('active', chk.checked);
+    document.getElementById('ttcCheckH').style.opacity = chk.checked ? '1' : '0';
+  } else {
+    document.getElementById('ttcDaily').classList.toggle('active', chk.checked);
+    document.getElementById('ttcCheckD').style.opacity = chk.checked ? '1' : '0';
+  }
   syncMetricTabsToDataType();
-});
-document.getElementById('toggleDaily').addEventListener('click', function(e){
-  if(e.target.tagName==='INPUT') return;
-  const chk = document.getElementById('chkDaily');
-  chk.checked = !chk.checked;
-  document.getElementById('ttcDaily').classList.toggle('active',chk.checked);
-  document.getElementById('ttcCheckD').style.opacity = chk.checked?'1':'0';
-  syncMetricTabsToDataType();
-});
+}
 
 // Sync metric panel tabs to match which data types are enabled
 function syncMetricTabsToDataType() {
@@ -2259,5 +2253,8 @@ function resetAnalytics() {
 
 
 </script>
+<!-- Hidden checkboxes for state tracking -->
+<input type="checkbox" id="chkHourly" checked style="display:none">
+<input type="checkbox" id="chkDaily" style="display:none">
 </body>
 </html>
