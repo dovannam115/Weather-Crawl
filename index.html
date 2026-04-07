@@ -5,709 +5,1085 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Weather Archive — Data Exporter</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --c-bg:#f0f4f8;
-  --c-surface:#ffffff;
-  --c-surface2:#f8fafc;
-  --c-border:#e2e8f0;
-  --c-border2:#cbd5e1;
-  --c-blue:#2563eb;
-  --c-blue-h:#1d4ed8;
-  --c-blue-s:#dbeafe;
-  --c-blue-t:rgba(37,99,235,0.08);
-  --c-green:#059669;
-  --c-green-s:#d1fae5;
-  --c-red:#dc2626;
-  --c-red-s:#fee2e2;
-  --c-amber:#d97706;
-  --c-amber-s:#fef3c7;
-  --c-slate:#64748b;
-  --c-slate2:#94a3b8;
-  --c-text:#0f172a;
-  --c-text2:#475569;
-  --c-text3:#94a3b8;
-  --shadow-sm:0 1px 2px rgba(0,0,0,0.05);
-  --shadow:0 1px 3px rgba(0,0,0,0.07),0 4px 12px rgba(0,0,0,0.05);
-  --shadow-md:0 4px 6px rgba(0,0,0,0.06),0 10px 24px rgba(0,0,0,0.07);
-  --shadow-lg:0 10px 15px rgba(0,0,0,0.06),0 20px 40px rgba(0,0,0,0.08);
-  --radius:10px;
-  --radius-sm:6px;
-  --radius-lg:14px;
-  --font:'Outfit',sans-serif;
-  --mono:'JetBrains Mono',monospace;
-}
-html{scroll-behavior:smooth}
-body{
-  font-family:var(--font);
-  background:var(--c-bg);
-  color:var(--c-text);
-  font-size:14px;
-  line-height:1.5;
-  min-height:100vh;
+/* ═══════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:         #f1f5f9;
+  --bg2:        #e8edf5;
+  --surface:    #ffffff;
+  --surface2:   #f8fafc;
+  --border:     #e2e8f0;
+  --border2:    #cbd5e1;
+  --blue:       #2563eb;
+  --blue-d:     #1d4ed8;
+  --blue-l:     #dbeafe;
+  --blue-t:     rgba(37,99,235,0.08);
+  --green:      #059669;
+  --green-l:    #d1fae5;
+  --red:        #dc2626;
+  --red-l:      #fee2e2;
+  --amber:      #d97706;
+  --amber-l:    #fef3c7;
+  --violet:     #7c3aed;
+  --slate:      #64748b;
+  --slate2:     #94a3b8;
+  --text:       #0f172a;
+  --text2:      #334155;
+  --text3:      #64748b;
+  --text4:      #94a3b8;
+  --sidebar-w:  220px;
+  --sidebar-ic: 60px;
+  --topbar-h:   56px;
+  --radius:     8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.06);
+  --shadow:     0 1px 3px rgba(0,0,0,0.07),0 4px 16px rgba(0,0,0,0.05);
+  --shadow-md:  0 4px 6px rgba(0,0,0,0.06),0 12px 28px rgba(0,0,0,0.07);
+  --font:       'Inter', system-ui, sans-serif;
+  --mono:       'JetBrains Mono', monospace;
+  --transition: .16s cubic-bezier(.4,0,.2,1);
 }
 
-/* ─── Layout ───────────────────────────────────────────────────────────────── */
-.page-wrap{max-width:1320px;margin:0 auto;padding:0 20px 60px}
+/* ═══════════════════════════════════════════════════════════════════
+   RESET
+═══════════════════════════════════════════════════════════════════ */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); font-size:14px; line-height:1.5; overflow-x:hidden; }
 
-/* ─── Header ───────────────────────────────────────────────────────────────── */
-.site-header{
-  background:var(--c-surface);
-  border-bottom:1px solid var(--c-border);
-  position:sticky;top:0;z-index:100;
-  box-shadow:var(--shadow-sm);
+/* ═══════════════════════════════════════════════════════════════════
+   APP SHELL — SIDEBAR LAYOUT
+═══════════════════════════════════════════════════════════════════ */
+.app-shell { display:flex; min-height:100vh; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 200;
+  transition: width var(--transition);
+  overflow: hidden;
 }
-.header-inner{
-  max-width:1320px;margin:0 auto;padding:0 20px;
-  height:60px;display:flex;align-items:center;gap:14px;
+.sidebar.collapsed { width: var(--sidebar-ic); }
+
+.sidebar-brand {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
-.header-icon{
-  width:36px;height:36px;border-radius:9px;
-  background:linear-gradient(135deg,#2563eb,#1e40af);
+.brand-icon {
+  width: 28px; height: 28px;
+  background: linear-gradient(135deg,#3b82f6,#1d4ed8);
+  border-radius: 7px;
+  display: flex; align-items:center; justify-content:center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(59,130,246,0.4);
+}
+.brand-icon svg { width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+.brand-name { font-size:14px;font-weight:700;color:#fff;letter-spacing:-.02em; }
+.brand-name span { color:#60a5fa; }
+
+/* Sidebar toggle button */
+.sidebar-toggle {
+  position:absolute; top:14px; right:-12px;
+  width:24px; height:24px;
+  background:var(--blue);
+  border:2px solid #0f172a;
+  border-radius:50%;
+  cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  z-index:10;
+  transition:background var(--transition);
+}
+.sidebar-toggle:hover { background:var(--blue-d); }
+.sidebar-toggle svg { width:10px;height:10px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round; transition:transform var(--transition); }
+.sidebar.collapsed .sidebar-toggle svg { transform:rotate(180deg); }
+
+/* Nav items */
+.sidebar-nav { flex:1; overflow-y:auto; overflow-x:hidden; padding:12px 0; }
+.sidebar-nav::-webkit-scrollbar { display:none; }
+.nav-section-label {
+  font-size:10px; font-weight:600; letter-spacing:.1em;
+  text-transform:uppercase; color:rgba(255,255,255,0.25);
+  padding:0 16px; margin:16px 0 4px;
+  white-space:nowrap; overflow:hidden;
+  transition:opacity var(--transition);
+}
+.sidebar.collapsed .nav-section-label { opacity:0; }
+
+.nav-item {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 16px; cursor:pointer;
+  color:rgba(255,255,255,0.55);
+  border-left:3px solid transparent;
+  transition:all var(--transition);
+  white-space:nowrap; overflow:hidden;
+  position:relative;
+  text-decoration:none;
+  user-select:none;
+}
+.nav-item:hover { color:rgba(255,255,255,0.9); background:rgba(255,255,255,0.05); }
+.nav-item.active { color:#fff; border-left-color:var(--blue); background:rgba(59,130,246,0.12); }
+.nav-item.locked { opacity:.35; cursor:not-allowed; pointer-events:none; }
+.nav-item-icon { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.nav-item-icon svg { width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+.nav-item-label { font-size:13.5px; font-weight:500; }
+.nav-item-badge {
+  margin-left:auto; font-size:10px; font-weight:600;
+  background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.5);
+  border-radius:10px; padding:1px 6px;
+  flex-shrink:0;
+}
+.nav-item.active .nav-item-badge { background:var(--blue-t); color:#60a5fa; }
+.nav-lock { width:12px;height:12px;margin-left:auto;flex-shrink:0;opacity:.5; }
+.nav-lock svg { width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+
+/* Step indicator dots on nav items */
+.nav-step-dot {
+  width:20px;height:20px;border-radius:50%;
+  background:rgba(255,255,255,0.08);
+  font-size:10px;font-weight:700;color:rgba(255,255,255,0.35);
   display:flex;align-items:center;justify-content:center;
   flex-shrink:0;
-  box-shadow:0 2px 8px rgba(37,99,235,0.3);
 }
-.header-icon svg{width:18px;height:18px;color:#fff;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.header-text h1{font-size:16px;font-weight:600;color:var(--c-text);letter-spacing:-0.01em}
-.header-text p{font-size:12px;color:var(--c-text3);margin-top:1px}
-.header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
-.badge{font-size:11px;font-weight:500;padding:3px 9px;border-radius:20px;background:var(--c-blue-s);color:var(--c-blue);letter-spacing:0.02em}
+.nav-item.active .nav-step-dot { background:var(--blue); color:#fff; }
+.nav-item.done .nav-step-dot { background:var(--green); color:#fff; }
 
-/* ─── Page hero strip ──────────────────────────────────────────────────────── */
-.page-hero{
-  background:linear-gradient(135deg,#1e3a5f 0%,#1e40af 50%,#1d4ed8 100%);
-  padding:32px 20px 28px;margin-bottom:28px;
-  position:relative;overflow:hidden;
+/* Sidebar footer */
+.sidebar-footer {
+  padding:12px 16px;
+  border-top:1px solid rgba(255,255,255,0.06);
+  flex-shrink:0; overflow:hidden; white-space:nowrap;
 }
-.page-hero::before{
-  content:'';position:absolute;inset:0;
-  background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+.sidebar-badge {
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,0.06);border-radius:6px;
+  padding:6px 10px;font-size:11px;color:rgba(255,255,255,0.4);
 }
-.page-hero-inner{max-width:1320px;margin:0 auto;position:relative}
-.page-hero h2{font-size:26px;font-weight:600;color:#fff;letter-spacing:-0.02em;margin-bottom:6px}
-.page-hero p{font-size:14px;color:rgba(255,255,255,0.7);max-width:520px}
-.hero-stats{display:flex;gap:24px;margin-top:20px;flex-wrap:wrap}
-.hero-stat{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 16px;backdrop-filter:blur(4px)}
-.hero-stat-val{font-size:18px;font-weight:600;color:#fff;line-height:1}
-.hero-stat-lbl{font-size:11px;color:rgba(255,255,255,0.6);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em}
+.sidebar-badge span { color:rgba(255,255,255,0.6);font-weight:500; }
 
-/* ─── Two-column grid ──────────────────────────────────────────────────────── */
-.main-grid{display:grid;grid-template-columns:380px 1fr;gap:20px;margin-bottom:20px}
-@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
+/* ── Main content area ── */
+.main-content {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  transition: margin-left var(--transition);
+  min-width:0;
+}
+.sidebar.collapsed ~ .main-content { margin-left: var(--sidebar-ic); }
 
-/* ─── Card ─────────────────────────────────────────────────────────────────── */
-.card{
-  background:var(--c-surface);
-  border:1px solid var(--c-border);
+/* ── Top bar ── */
+.topbar {
+  height: var(--topbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 16px;
+  position: sticky; top:0; z-index:100;
+  box-shadow: var(--shadow-sm);
+}
+.topbar-breadcrumb {
+  display:flex;align-items:center;gap:8px;
+  font-size:13px;color:var(--text3);
+}
+.topbar-breadcrumb strong { color:var(--text);font-weight:600; }
+.topbar-sep { color:var(--border2); }
+.topbar-actions { margin-left:auto; display:flex;align-items:center;gap:8px; }
+.topbar-status {
+  display:flex;align-items:center;gap:6px;
+  font-size:12px;color:var(--text3);
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:20px;padding:4px 12px;
+}
+.status-dot { width:7px;height:7px;border-radius:50%;background:var(--border2); }
+.status-dot.ready { background:var(--green);box-shadow:0 0 6px rgba(5,150,105,0.4); }
+
+/* Progress pipeline */
+.pipeline {
+  display:flex;align-items:center;gap:0;
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:20px;padding:3px;
+}
+.pipeline-step {
+  display:flex;align-items:center;gap:5px;
+  padding:4px 12px;border-radius:17px;
+  font-size:12px;font-weight:500;color:var(--text4);
+  cursor:default;transition:all var(--transition);
+  white-space:nowrap;
+}
+.pipeline-step.active { background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(37,99,235,0.25); }
+.pipeline-step.done { color:var(--green);font-weight:500; }
+.pipeline-step svg { width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+.pipeline-arrow { color:var(--border2);font-size:12px;padding:0 2px; }
+
+/* ── Page content ── */
+.page-content { padding:24px 28px 60px; }
+
+/* ── Sections ── */
+.page-section { display:none; }
+.page-section.active { display:block; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOBILE SIDEBAR
+═══════════════════════════════════════════════════════════════════ */
+.mobile-overlay {
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:190;
+}
+.hamburger {
+  display:none;
+  width:36px;height:36px;border-radius:var(--radius);border:none;
+  background:var(--surface);border:1px solid var(--border);
+  cursor:pointer;align-items:center;justify-content:center;
+  margin-right:8px;
+}
+.hamburger svg { width:16px;height:16px;fill:none;stroke:var(--text);stroke-width:2;stroke-linecap:round; }
+@media(max-width:768px){
+  .sidebar { transform:translateX(-100%);width:var(--sidebar-w) !important; }
+  .sidebar.mobile-open { transform:translateX(0); }
+  .mobile-overlay.visible { display:block; }
+  .main-content { margin-left:0 !important; }
+  .hamburger { display:flex; }
+  .sidebar-toggle { display:none; }
+  .page-content { padding:16px; }
+  .topbar { padding:0 16px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CARDS
+═══════════════════════════════════════════════════════════════════ */
+.card {
+  background:var(--surface);
+  border:1px solid var(--border);
   border-radius:var(--radius-lg);
   box-shadow:var(--shadow);
 }
-.card-header{
-  padding:18px 20px 16px;
-  border-bottom:1px solid var(--c-border);
-  display:flex;align-items:center;gap:10px;
+.card-header {
+  padding:16px 20px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;
 }
-.card-header-icon{
-  width:32px;height:32px;border-radius:8px;
-  display:flex;align-items:center;justify-content:center;
-  flex-shrink:0;
+.card-icon {
+  width:34px;height:34px;border-radius:var(--radius);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
 }
-.card-header-icon.blue{background:var(--c-blue-s)}
-.card-header-icon.green{background:var(--c-green-s)}
-.card-header-icon.amber{background:var(--c-amber-s)}
-.card-header-icon svg{width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.card-header-icon.blue svg{stroke:var(--c-blue)}
-.card-header-icon.green svg{stroke:var(--c-green)}
-.card-header-icon.amber svg{stroke:var(--c-amber)}
-.card-title{font-size:14px;font-weight:600;color:var(--c-text)}
-.card-subtitle{font-size:12px;color:var(--c-text3);margin-top:1px}
-.card-body{padding:20px}
+.card-icon.blue { background:var(--blue-l); }
+.card-icon.green { background:var(--green-l); }
+.card-icon.amber { background:var(--amber-l); }
+.card-icon.violet { background:rgba(124,58,237,0.1); }
+.card-icon svg { width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+.card-icon.blue svg { stroke:var(--blue); }
+.card-icon.green svg { stroke:var(--green); }
+.card-icon.amber svg { stroke:var(--amber); }
+.card-icon.violet svg { stroke:var(--violet); }
+.card-title { font-size:14px;font-weight:600;color:var(--text); }
+.card-desc { font-size:12px;color:var(--text3);margin-top:1px; }
+.card-body { padding:20px; }
 
-/* ─── Form elements ────────────────────────────────────────────────────────── */
-.field{margin-bottom:14px}
-.field:last-child{margin-bottom:0}
-.field-label{
-  display:block;font-size:12px;font-weight:500;
-  color:var(--c-text2);margin-bottom:5px;
-  letter-spacing:0.02em;
-}
-.field-label span{color:var(--c-red);margin-left:2px}
-.input-wrap{position:relative}
-.input-wrap .icon{
-  position:absolute;left:11px;top:50%;transform:translateY(-50%);
-  pointer-events:none;opacity:0.4;
-}
-.input-wrap .icon svg{width:15px;height:15px;fill:none;stroke:var(--c-text);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.input{
+/* ═══════════════════════════════════════════════════════════════════
+   FORM ELEMENTS
+═══════════════════════════════════════════════════════════════════ */
+.field { margin-bottom:14px; }
+.field:last-child { margin-bottom:0; }
+.field-label { display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:5px; }
+.field-label span { color:var(--red); }
+.input-wrap { position:relative; }
+.input-icon { position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none; }
+.input-icon svg { width:15px;height:15px;fill:none;stroke:var(--text);stroke-width:2;stroke-linecap:round; }
+.input,.select,.input-sm {
   width:100%;padding:9px 12px;
-  border:1.5px solid var(--c-border);
-  border-radius:var(--radius-sm);
-  font-family:var(--font);font-size:13.5px;
-  color:var(--c-text);background:var(--c-surface);
-  transition:border-color .15s,box-shadow .15s;
-  outline:none;
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  font-family:var(--font);font-size:13.5px;color:var(--text);
+  background:var(--surface);outline:none;
+  transition:border-color var(--transition),box-shadow var(--transition);
   color-scheme:light;
 }
-.input-wrap .input{padding-left:34px}
-.input:focus{border-color:var(--c-blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1)}
-.input.error{border-color:var(--c-red);box-shadow:0 0 0 3px rgba(220,38,38,0.1)}
-.input-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.field-error{font-size:11px;color:var(--c-red);margin-top:4px;display:none}
-.field-error.visible{display:block}
+.input-wrap .input { padding-left:34px; }
+.input:focus,.select:focus,.input-sm:focus {
+  border-color:var(--blue);
+  box-shadow:0 0 0 3px rgba(37,99,235,0.1);
+}
+.input.error { border-color:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,0.1); }
+.input-row { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.field-error { font-size:11px;color:var(--red);margin-top:4px;display:none; }
+.field-error.visible { display:block; }
 
-/* ─── Input method tabs (location) ────────────────────────────────────────── */
-.method-tabs{display:flex;background:var(--c-bg);border-radius:var(--radius-sm);padding:3px;margin-bottom:16px;gap:2px}
-.method-tab{
-  flex:1;font-family:var(--font);font-size:12px;font-weight:500;
-  border:none;background:transparent;color:var(--c-text3);
-  padding:7px 10px;border-radius:6px;cursor:pointer;
-  transition:background .15s,color .15s;text-align:center;
-}
-.method-tab.active{background:var(--c-surface);color:var(--c-blue);box-shadow:var(--shadow-sm)}
-.tab-pane{display:none}.tab-pane.active{display:block}
-
-/* ─── Location cards ───────────────────────────────────────────────────────── */
-.loc-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
-.loc-card{
-  border:1.5px solid var(--c-border);
-  border-radius:var(--radius);
-  padding:14px;
-  background:var(--c-surface2);
-  position:relative;
-  transition:border-color .15s;
-}
-.loc-card:hover{border-color:var(--c-border2)}
-.loc-card-top{display:flex;align-items:center;gap:8px;margin-bottom:12px}
-.loc-num{
-  width:22px;height:22px;border-radius:50%;
-  font-size:11px;font-weight:600;color:#fff;
-  display:flex;align-items:center;justify-content:center;
-  flex-shrink:0;
-}
-.loc-name-preview{font-size:13px;font-weight:500;color:var(--c-text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.loc-del{
-  width:26px;height:26px;border:none;background:transparent;
-  color:var(--c-text3);border-radius:6px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:background .15s,color .15s;flex-shrink:0;
-}
-.loc-del:hover{background:var(--c-red-s);color:var(--c-red)}
-.loc-del svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.loc-fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.loc-fields .field{margin-bottom:0}
-.loc-fields .field:first-child{grid-column:1/-1}
-.btn-add-loc{
-  width:100%;padding:9px;border:1.5px dashed var(--c-border2);
-  border-radius:var(--radius-sm);background:transparent;
-  color:var(--c-text3);font-family:var(--font);font-size:13px;
-  cursor:pointer;transition:border-color .15s,color .15s,background .15s;
-  display:flex;align-items:center;justify-content:center;gap:6px;
-}
-.btn-add-loc:hover{border-color:var(--c-blue);color:var(--c-blue);background:var(--c-blue-t)}
-
-/* ─── Import zone ──────────────────────────────────────────────────────────── */
-.import-zone{
-  border:2px dashed var(--c-border2);border-radius:var(--radius);
-  padding:28px 20px;text-align:center;
-  transition:border-color .2s,background .2s;
-  background:var(--c-surface2);
-}
-.import-zone.dragover{border-color:var(--c-blue);background:var(--c-blue-t)}
-.import-zone-icon{font-size:32px;margin-bottom:10px;opacity:0.5}
-.import-zone p{font-size:13px;color:var(--c-text3);margin-bottom:16px;line-height:1.6}
-.import-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-#uploadInput{display:none}
-.import-feedback{
-  margin-top:12px;font-size:12px;padding:8px 12px;
-  border-radius:var(--radius-sm);display:none;
-  text-align:left;
-}
-.import-feedback.ok{display:block;background:var(--c-green-s);color:var(--c-green);border:1px solid #a7f3d0}
-.import-feedback.err{display:block;background:var(--c-red-s);color:var(--c-red);border:1px solid #fecaca}
-
-/* ─── Metric panel tabs ────────────────────────────────────────────────────── */
-.metric-tabs{display:flex;border-bottom:1px solid var(--c-border);padding:0 20px;gap:0}
-.metric-tab{
-  font-family:var(--font);font-size:13px;font-weight:500;
-  border:none;background:transparent;color:var(--c-text3);
-  padding:12px 16px;cursor:pointer;position:relative;
-  border-bottom:2px solid transparent;margin-bottom:-1px;
-  transition:color .15s;
-}
-.metric-tab.active{color:var(--c-blue);border-bottom-color:var(--c-blue)}
-.metric-tab .cnt{
-  font-size:11px;font-weight:600;
-  background:var(--c-blue-s);color:var(--c-blue);
-  border-radius:10px;padding:1px 6px;margin-left:6px;
-}
-.metric-tab:not(.active) .cnt{background:var(--c-bg);color:var(--c-text3)}
-
-/* ─── Metric search & controls ─────────────────────────────────────────────── */
-.metric-controls{padding:14px 20px;border-bottom:1px solid var(--c-border);display:flex;gap:8px;align-items:center}
-.metric-search{
-  flex:1;padding:7px 10px 7px 32px;
-  border:1.5px solid var(--c-border);border-radius:var(--radius-sm);
-  font-family:var(--font);font-size:13px;color:var(--c-text);
-  background:var(--c-bg);outline:none;transition:border-color .15s,box-shadow .15s;
-}
-.metric-search:focus{border-color:var(--c-blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1);background:var(--c-surface)}
-.metric-search-wrap{position:relative;flex:1}
-.metric-search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;fill:none;stroke:var(--c-text3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
-.btn-sm{
-  font-family:var(--font);font-size:12px;font-weight:500;
-  border:1.5px solid var(--c-border);background:transparent;
-  color:var(--c-text2);border-radius:var(--radius-sm);
-  padding:6px 11px;cursor:pointer;
-  transition:border-color .15s,color .15s,background .15s;white-space:nowrap;
-}
-.btn-sm:hover{border-color:var(--c-blue);color:var(--c-blue);background:var(--c-blue-t)}
-
-/* ─── Metric grid ──────────────────────────────────────────────────────────── */
-.metric-grid{
-  padding:14px 20px;
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
-  gap:6px;max-height:320px;overflow-y:auto;
-}
-.metric-item{
-  display:flex;align-items:center;gap:9px;
-  padding:8px 10px;border-radius:var(--radius-sm);
-  cursor:pointer;transition:background .12s;
-  border:1.5px solid transparent;
-}
-.metric-item:hover{background:var(--c-bg)}
-.metric-item.checked{background:var(--c-blue-t);border-color:rgba(37,99,235,0.2)}
-.metric-cb{
-  width:16px;height:16px;border-radius:4px;
-  border:1.5px solid var(--c-border2);
-  flex-shrink:0;display:flex;align-items:center;justify-content:center;
-  transition:border-color .12s,background .12s;
-  background:var(--c-surface);
-}
-.metric-item.checked .metric-cb{border-color:var(--c-blue);background:var(--c-blue)}
-.metric-cb svg{width:9px;height:9px;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;fill:none;opacity:0;transition:opacity .1s}
-.metric-item.checked .metric-cb svg{opacity:1}
-.metric-item input[type=checkbox]{display:none}
-.metric-label{font-size:12.5px;color:var(--c-text2);line-height:1.3}
-.metric-item.checked .metric-label{color:var(--c-text);font-weight:500}
-.metric-unit{font-size:11px;color:var(--c-text3);display:block;font-family:var(--mono)}
-.metric-footer{
-  padding:10px 20px;border-top:1px solid var(--c-border);
-  font-size:12px;color:var(--c-text3);
-  display:flex;align-items:center;justify-content:space-between;
-}
-.metric-footer strong{color:var(--c-blue)}
-.metric-empty{padding:30px 20px;text-align:center;color:var(--c-text3);font-size:13px}
-
-/* ─── Action bar ───────────────────────────────────────────────────────────── */
-.action-bar{
-  background:var(--c-surface);border:1px solid var(--c-border);
-  border-radius:var(--radius-lg);padding:16px 20px;
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  box-shadow:var(--shadow);margin-bottom:20px;
-}
-.action-bar-left{display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap}
-.action-bar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
-
-/* ─── Buttons ──────────────────────────────────────────────────────────────── */
-.btn{
+/* ═══════════════════════════════════════════════════════════════════
+   BUTTONS
+═══════════════════════════════════════════════════════════════════ */
+.btn {
   font-family:var(--font);font-size:13.5px;font-weight:500;
-  border:none;border-radius:var(--radius-sm);cursor:pointer;
-  padding:10px 20px;transition:all .15s;
+  border:none;border-radius:var(--radius);cursor:pointer;
+  padding:9px 18px;transition:all var(--transition);
   display:inline-flex;align-items:center;gap:7px;
   white-space:nowrap;
 }
-.btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
-.btn-primary{background:var(--c-blue);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,0.3)}
-.btn-primary:hover{background:var(--c-blue-h);box-shadow:0 4px 12px rgba(37,99,235,0.35);transform:translateY(-1px)}
-.btn-primary:active{transform:translateY(0)}
-.btn-primary:disabled{opacity:0.45;cursor:not-allowed;transform:none;box-shadow:none}
-.btn-success{background:var(--c-green);color:#fff;box-shadow:0 1px 3px rgba(5,150,105,0.3)}
-.btn-success:hover{background:#047857;box-shadow:0 4px 12px rgba(5,150,105,0.35);transform:translateY(-1px)}
-.btn-success:disabled{opacity:0.35;cursor:not-allowed;transform:none;box-shadow:none}
-.btn-ghost{background:transparent;color:var(--c-text2);border:1.5px solid var(--c-border)}
-.btn-ghost:hover{border-color:var(--c-border2);background:var(--c-bg);color:var(--c-text)}
-.btn-outline-blue{background:transparent;color:var(--c-blue);border:1.5px solid currentColor}
-.btn-outline-blue:hover{background:var(--c-blue-t)}
+.btn svg { width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0; }
+.btn-primary { background:var(--blue);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,0.3); }
+.btn-primary:hover { background:var(--blue-d);box-shadow:0 4px 12px rgba(37,99,235,0.35);transform:translateY(-1px); }
+.btn-primary:active { transform:none; }
+.btn-primary:disabled { opacity:.4;cursor:not-allowed;transform:none;box-shadow:none; }
+.btn-success { background:var(--green);color:#fff;box-shadow:0 1px 3px rgba(5,150,105,0.3); }
+.btn-success:hover { background:#047857;box-shadow:0 4px 12px rgba(5,150,105,0.3);transform:translateY(-1px); }
+.btn-success:disabled { opacity:.35;cursor:not-allowed;transform:none;box-shadow:none; }
+.btn-ghost { background:transparent;color:var(--text2);border:1.5px solid var(--border); }
+.btn-ghost:hover { border-color:var(--border2);background:var(--bg);color:var(--text); }
+.btn-outline-blue { background:transparent;color:var(--blue);border:1.5px solid var(--blue); }
+.btn-outline-blue:hover { background:var(--blue-t); }
+.btn-outline-green { background:transparent;color:var(--green);border:1.5px solid var(--green); }
+.btn-outline-green:hover { background:var(--green-l); }
+.btn-outline-green:disabled { opacity:.3;cursor:not-allowed; }
+.btn-sm { font-size:12px;padding:6px 12px; }
+.btn-icon { padding:8px;border-radius:var(--radius); }
 
-/* ─── Progress bar ─────────────────────────────────────────────────────────── */
-.progress-wrap{flex:1;min-width:180px;display:none}
-.progress-wrap.visible{display:block}
-.progress-label{font-size:12px;color:var(--c-text2);margin-bottom:5px;display:flex;justify-content:space-between}
-.progress-track{height:5px;background:var(--c-border);border-radius:3px;overflow:hidden}
-.progress-fill{height:100%;background:linear-gradient(90deg,var(--c-blue),#60a5fa);border-radius:3px;transition:width .3s;width:0%}
+/* ═══════════════════════════════════════════════════════════════════
+   FETCH SECTION — 2-col layout
+═══════════════════════════════════════════════════════════════════ */
+.fetch-grid { display:grid;grid-template-columns:360px 1fr;gap:20px;align-items:start; }
+@media(max-width:900px){ .fetch-grid { grid-template-columns:1fr; } }
 
-/* ─── Spinner ──────────────────────────────────────────────────────────────── */
-.spinner-wrap{display:none;align-items:center;gap:8px;font-size:13px;color:var(--c-text2)}
-.spinner-wrap.visible{display:flex}
-.spin{width:18px;height:18px;border:2px solid var(--c-border2);border-top-color:var(--c-blue);border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-/* ─── Alert messages ───────────────────────────────────────────────────────── */
-.alert{
-  border-radius:var(--radius);padding:13px 16px;
-  font-size:13px;display:none;
-  align-items:flex-start;gap:10px;margin-bottom:16px;
+/* Location cards */
+.loc-list { display:flex;flex-direction:column;gap:10px;margin-bottom:12px; }
+.loc-card {
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  padding:14px;background:var(--surface2);
+  position:relative;transition:border-color var(--transition);
 }
-.alert.visible{display:flex}
-.alert svg{width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px}
-.alert-error{background:var(--c-red-s);border:1px solid #fecaca;color:#991b1b}
-.alert-error svg{stroke:#dc2626}
-.alert-success{background:var(--c-green-s);border:1px solid #a7f3d0;color:#065f46}
-.alert-success svg{stroke:#059669}
-.alert-body{flex:1;line-height:1.5}
-
-/* ─── Results section ──────────────────────────────────────────────────────── */
-.results-section{margin-bottom:20px}
-.results-header-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.results-location-label{
-  font-size:15px;font-weight:600;color:var(--c-text);
-  display:flex;align-items:center;gap:8px;
+.loc-card:hover { border-color:var(--border2); }
+.loc-card-top { display:flex;align-items:center;gap:8px;margin-bottom:12px; }
+.loc-num { width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:600;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0; }
+.loc-name-preview { font-size:13px;font-weight:500;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.loc-del { width:26px;height:26px;border:none;background:transparent;color:var(--text3);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--transition),color var(--transition);flex-shrink:0; }
+.loc-del:hover { background:var(--red-l);color:var(--red); }
+.loc-del svg { width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+.loc-fields { display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px; }
+.loc-fields .field { margin-bottom:0; }
+.loc-fields .field:first-child { grid-column:1/-1; }
+.btn-add-loc {
+  width:100%;padding:9px;border:1.5px dashed var(--border2);
+  border-radius:var(--radius);background:transparent;
+  color:var(--text3);font-family:var(--font);font-size:13px;
+  cursor:pointer;transition:border-color var(--transition),color var(--transition),background var(--transition);
+  display:flex;align-items:center;justify-content:center;gap:6px;
 }
-.results-location-label .loc-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.results-coords{font-size:12px;color:var(--c-text3);font-family:var(--mono)}
+.btn-add-loc:hover { border-color:var(--blue);color:var(--blue);background:var(--blue-t); }
 
-/* Result sub-tabs */
-.result-tabs{display:flex;background:var(--c-bg);border-radius:var(--radius-sm);padding:3px;gap:2px;width:fit-content;margin-bottom:14px}
-.result-tab{
-  font-family:var(--font);font-size:12.5px;font-weight:500;
-  border:none;background:transparent;color:var(--c-text3);
-  padding:6px 14px;border-radius:6px;cursor:pointer;
-  transition:background .15s,color .15s;
-}
-.result-tab.active{background:var(--c-surface);color:var(--c-blue);box-shadow:var(--shadow-sm)}
+/* Method tabs (location import) */
+.method-tabs { display:flex;background:var(--bg);border-radius:var(--radius);padding:3px;margin-bottom:16px;gap:2px; }
+.method-tab { flex:1;font-family:var(--font);font-size:12px;font-weight:500;border:none;background:transparent;color:var(--text3);padding:7px 10px;border-radius:6px;cursor:pointer;transition:background var(--transition),color var(--transition);text-align:center; }
+.method-tab.active { background:var(--surface);color:var(--blue);box-shadow:var(--shadow-sm); }
+.tab-pane { display:none; }
+.tab-pane.active { display:block; }
 
-/* Table */
-.table-card{
-  background:var(--c-surface);border:1px solid var(--c-border);
-  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);
+/* Import zone */
+.import-zone {
+  border:2px dashed var(--border2);border-radius:var(--radius);
+  padding:28px 20px;text-align:center;
+  transition:border-color var(--transition),background var(--transition);
+  background:var(--surface2);
 }
-.table-wrap{overflow-x:auto;max-height:360px;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-thead{position:sticky;top:0;z-index:2}
-thead th{
-  background:var(--c-surface2);color:var(--c-text2);
-  font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;
-  padding:10px 14px;text-align:left;white-space:nowrap;
-  border-bottom:1px solid var(--c-border);
-}
-tbody tr{border-bottom:1px solid rgba(226,232,240,0.6);transition:background .1s}
-tbody tr:hover{background:#f8fafc}
-tbody tr:last-child{border-bottom:none}
-tbody td{padding:9px 14px;color:var(--c-text2);white-space:nowrap;font-family:var(--mono);font-size:12px}
-tbody td:first-child{color:var(--c-blue);font-weight:500}
-.table-footer{
-  padding:10px 16px;border-top:1px solid var(--c-border);
-  font-size:12px;color:var(--c-text3);
-  background:var(--c-surface2);
-  display:flex;align-items:center;justify-content:space-between;
-}
+.import-zone.dragover { border-color:var(--blue);background:var(--blue-t); }
+.import-zone p { font-size:13px;color:var(--text3);margin-bottom:16px;line-height:1.6; }
+.import-actions { display:flex;gap:8px;justify-content:center;flex-wrap:wrap; }
+#uploadInput { display:none; }
+.import-feedback { margin-top:12px;font-size:12px;padding:8px 12px;border-radius:var(--radius);display:none;text-align:left; }
+.import-feedback.ok { display:block;background:var(--green-l);color:var(--green);border:1px solid #a7f3d0; }
+.import-feedback.err { display:block;background:var(--red-l);color:var(--red);border:1px solid #fecaca; }
 
-/* ─── Empty state ──────────────────────────────────────────────────────────── */
-.empty-state{
-  background:var(--c-surface);border:1px solid var(--c-border);
-  border-radius:var(--radius-lg);padding:60px 20px;
-  text-align:center;box-shadow:var(--shadow);
+/* Metric panel */
+.metric-tabs { display:flex;border-bottom:1px solid var(--border);padding:0 20px;gap:0; }
+.metric-tab { font-family:var(--font);font-size:13px;font-weight:500;border:none;background:transparent;color:var(--text3);padding:11px 16px;cursor:pointer;position:relative;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color var(--transition); }
+.metric-tab.active { color:var(--blue);border-bottom-color:var(--blue); }
+.metric-cnt { font-size:11px;font-weight:600;background:var(--blue-l);color:var(--blue);border-radius:10px;padding:1px 6px;margin-left:6px; }
+.metric-tab:not(.active) .metric-cnt { background:var(--bg);color:var(--text3); }
+.metric-controls { padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center; }
+.metric-search-wrap { position:relative;flex:1; }
+.metric-search-wrap svg { position:absolute;left:9px;top:50%;transform:translateY(-50%);width:14px;height:14px;fill:none;stroke:var(--text3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none; }
+.metric-search { width:100%;padding:7px 10px 7px 30px;border:1.5px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px;color:var(--text);background:var(--bg);outline:none;transition:border-color var(--transition); }
+.metric-search:focus { border-color:var(--blue);background:var(--surface); }
+.btn-sm-ctrl { font-family:var(--font);font-size:12px;font-weight:500;border:1.5px solid var(--border);background:transparent;color:var(--text2);border-radius:var(--radius);padding:6px 11px;cursor:pointer;transition:all var(--transition);white-space:nowrap; }
+.btn-sm-ctrl:hover { border-color:var(--blue);color:var(--blue);background:var(--blue-t); }
+.metric-grid { padding:12px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:5px;max-height:300px;overflow-y:auto; }
+.metric-item { display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius);cursor:pointer;transition:background var(--transition);border:1.5px solid transparent; }
+.metric-item:hover { background:var(--bg); }
+.metric-item.checked { background:var(--blue-t);border-color:rgba(37,99,235,0.2); }
+.metric-cb { width:15px;height:15px;border-radius:4px;border:1.5px solid var(--border2);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all var(--transition);background:var(--surface); }
+.metric-item.checked .metric-cb { border-color:var(--blue);background:var(--blue); }
+.metric-cb svg { width:9px;height:9px;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;fill:none;opacity:0;transition:opacity .1s; }
+.metric-item.checked .metric-cb svg { opacity:1; }
+.metric-item input[type=checkbox] { display:none; }
+.metric-label { font-size:12.5px;color:var(--text2); }
+.metric-item.checked .metric-label { color:var(--text);font-weight:500; }
+.metric-unit { font-size:11px;color:var(--text4);font-family:var(--mono);display:block; }
+.metric-footer { padding:10px 20px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);display:flex;align-items:center;justify-content:space-between; }
+.metric-footer strong { color:var(--blue); }
+.metric-empty { padding:24px 20px;text-align:center;color:var(--text3);font-size:13px; }
+
+/* Toggle cards (hourly/daily selector) */
+.type-toggle-card { cursor:pointer;display:block; }
+.ttc-inner { border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center;transition:all var(--transition);background:var(--surface2);position:relative; }
+.ttc-inner:hover { border-color:var(--border2); }
+.ttc-inner.active { border-color:var(--blue);background:var(--blue-t); }
+.ttc-icon { font-size:20px;margin-bottom:4px; }
+.ttc-label { font-size:13.5px;font-weight:600;color:var(--text); }
+.ttc-desc { font-size:11px;color:var(--text3);margin-top:2px; }
+.ttc-check { position:absolute;top:8px;right:10px;font-size:12px;color:var(--blue);font-weight:700; }
+
+/* Action bar */
+.action-bar { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:var(--shadow);margin-bottom:20px; }
+.action-bar-left { display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap; }
+.action-bar-right { display:flex;align-items:center;gap:8px;margin-left:auto; }
+.progress-wrap { display:none; }
+.progress-wrap.visible { display:block;min-width:180px; }
+.progress-label { font-size:12px;color:var(--text2);margin-bottom:5px;display:flex;justify-content:space-between; }
+.progress-track { height:4px;background:var(--border);border-radius:2px;overflow:hidden; }
+.progress-fill { height:100%;background:linear-gradient(90deg,var(--blue),#60a5fa);border-radius:2px;transition:width .3s;width:0%; }
+.spinner-wrap { display:none;align-items:center;gap:8px;font-size:13px;color:var(--text2); }
+.spinner-wrap.visible { display:flex; }
+.spin { width:18px;height:18px;border:2px solid var(--border2);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ALERTS & TOASTS
+═══════════════════════════════════════════════════════════════════ */
+.alert { border-radius:var(--radius);padding:13px 16px;font-size:13px;display:none;align-items:flex-start;gap:10px;margin-bottom:16px; }
+.alert.visible { display:flex; }
+.alert svg { width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px; }
+.alert-error { background:var(--red-l);border:1px solid #fecaca;color:#991b1b; }
+.alert-error svg { stroke:var(--red); }
+.alert-success { background:var(--green-l);border:1px solid #a7f3d0;color:#065f46; }
+.alert-success svg { stroke:var(--green); }
+.alert-body { flex:1;line-height:1.5; }
+
+/* Toast */
+.toast-container { position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none; }
+.toast {
+  background:var(--text);color:#fff;border-radius:var(--radius);
+  padding:12px 16px;font-size:13px;display:flex;align-items:center;gap:8px;
+  box-shadow:var(--shadow-md);pointer-events:auto;
+  animation:toastIn .25s ease;max-width:320px;
 }
-.empty-icon{font-size:44px;margin-bottom:14px;opacity:0.4}
-.empty-title{font-size:16px;font-weight:600;color:var(--c-text);margin-bottom:6px}
-.empty-desc{font-size:13px;color:var(--c-text3);max-width:340px;margin:0 auto;line-height:1.6}
+.toast.success { background:#064e3b;border-left:3px solid var(--green); }
+.toast.error { background:#7f1d1d;border-left:3px solid var(--red); }
+@keyframes toastIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+.toast svg { width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0; }
 
-/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--c-border2);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--c-slate2)}
+/* ═══════════════════════════════════════════════════════════════════
+   RESULTS / PREVIEW TABLES
+═══════════════════════════════════════════════════════════════════ */
+.results-section { margin-bottom:20px; }
+.results-loc-header { display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid var(--border); }
+.results-loc-name { font-size:15px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px; }
+.results-loc-dot { width:10px;height:10px;border-radius:50%;flex-shrink:0; }
+.results-loc-coords { font-size:12px;color:var(--text3);font-family:var(--mono); }
+.result-tabs { display:flex;background:var(--bg);border-radius:var(--radius);padding:3px;gap:2px;width:fit-content;margin-bottom:12px; }
+.result-tab { font-family:var(--font);font-size:12.5px;font-weight:500;border:none;background:transparent;color:var(--text3);padding:5px 14px;border-radius:6px;cursor:pointer;transition:all var(--transition); }
+.result-tab.active { background:var(--surface);color:var(--blue);box-shadow:var(--shadow-sm); }
+.table-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow); }
+.table-wrap { overflow-x:auto;max-height:340px;overflow-y:auto; }
+table { width:100%;border-collapse:collapse;font-size:12.5px; }
+thead { position:sticky;top:0;z-index:2; }
+thead th { background:var(--surface2);color:var(--text2);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:9px 14px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border); }
+tbody tr { border-bottom:1px solid rgba(226,232,240,0.6);transition:background var(--transition); }
+tbody tr:hover { background:#f8fafc; }
+tbody tr:last-child { border-bottom:none; }
+tbody td { padding:8px 14px;color:var(--text2);white-space:nowrap;font-family:var(--mono);font-size:12px; }
+tbody td:first-child { color:var(--blue);font-weight:500; }
+.table-footer { padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);background:var(--surface2);display:flex;align-items:center;justify-content:space-between; }
+.empty-state { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:60px 20px;text-align:center;box-shadow:var(--shadow); }
+.empty-icon { font-size:40px;margin-bottom:12px;opacity:.45; }
+.empty-title { font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px; }
+.empty-desc { font-size:13px;color:var(--text3);max-width:340px;margin:0 auto;line-height:1.6; }
 
-/* ─── Responsive ───────────────────────────────────────────────────────────── */
-@media(max-width:600px){
-  .page-hero h2{font-size:20px}
-  .action-bar{flex-direction:column;align-items:stretch}
-  .action-bar-right{margin-left:0}
-  .hero-stats{gap:10px}
-  .loc-fields{grid-template-columns:1fr 1fr}
-  .loc-fields .field:first-child{grid-column:1/-1}
+/* ═══════════════════════════════════════════════════════════════════
+   ANALYTICS SECTION
+═══════════════════════════════════════════════════════════════════ */
+/* KPI header row */
+.an-kpi-row { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px; }
+.an-kpi {
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:14px 16px;box-shadow:var(--shadow-sm);
+  transition:box-shadow var(--transition);
 }
+.an-kpi:hover { box-shadow:var(--shadow); }
+.an-kpi-label { font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px; }
+.an-kpi-value { font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono);line-height:1; }
+.an-kpi-sub { font-size:11px;color:var(--text4);margin-top:3px; }
+.an-kpi.blue .an-kpi-value { color:var(--blue); }
+.an-kpi.green .an-kpi-value { color:var(--green); }
+.an-kpi.amber .an-kpi-value { color:var(--amber); }
+.an-kpi.red .an-kpi-value { color:var(--red); }
 
-/* ─── Utility ──────────────────────────────────────────────────────────────── */
-.mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}
-.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+/* Analytics 2-col layout */
+.analytics-layout { display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start; }
+@media(max-width:900px){ .analytics-layout { grid-template-columns:1fr; } }
+
+/* Control panel */
+.an-panel { position:sticky;top:calc(var(--topbar-h) + 16px); }
+.an-ctrl-section { padding:14px 16px;border-bottom:1px solid var(--border); }
+.an-ctrl-section:last-child { border-bottom:none; }
+.ctrl-label { font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between; }
+
+/* Dataset toggle pills */
+.ds-toggle { display:flex;gap:4px;background:var(--bg);border-radius:var(--radius);padding:3px; }
+.ds-btn {
+  flex:1;font-family:var(--font);font-size:12px;font-weight:500;
+  border:none;background:transparent;color:var(--text3);
+  padding:6px 8px;border-radius:6px;cursor:pointer;
+  transition:all var(--transition);text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:1px;
+}
+.ds-btn .ds-count { font-size:10px;opacity:.6; }
+.ds-btn.active { background:var(--surface);color:var(--blue);box-shadow:var(--shadow-sm); }
+.ds-btn.active .ds-count { opacity:1;color:var(--blue); }
+.ds-btn:disabled { opacity:.3;cursor:not-allowed; }
+
+/* Quick date filters */
+.quick-dates { display:flex;gap:4px;flex-wrap:wrap;margin-top:6px; }
+.quick-date-btn { font-family:var(--font);font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all var(--transition); }
+.quick-date-btn:hover { border-color:var(--blue);color:var(--blue); }
+.quick-date-btn.active { background:var(--blue);color:#fff;border-color:var(--blue); }
+
+/* Analytics output tabs */
+.an-out-tabs { display:flex;border-bottom:1px solid var(--border);margin-bottom:16px; }
+.an-out-tab { font-family:var(--font);font-size:13px;font-weight:500;border:none;background:transparent;color:var(--text3);padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all var(--transition);display:flex;align-items:center;gap:6px; }
+.an-out-tab:hover { color:var(--text); }
+.an-out-tab.active { color:var(--blue);border-bottom-color:var(--blue); }
+.an-out-tab svg { width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round; }
+.an-tab-content { display:none; }
+.an-tab-content.active { display:block; }
+
+/* Stats grid */
+.stats-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px; }
+.stat-box { background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:12px; }
+.stat-box-lbl { font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px; }
+.stat-box-val { font-size:17px;font-weight:700;color:var(--text);font-family:var(--mono); }
+
+/* Quality rows */
+.quality-row { display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px; }
+.quality-row:last-child { border-bottom:none; }
+.badge-ok { background:var(--green-l);color:var(--green);border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600; }
+.badge-warn { background:var(--amber-l);color:var(--amber);border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600; }
+.badge-err { background:var(--red-l);color:var(--red);border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600; }
+
+/* Chart wrapper */
+.chart-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow);margin-bottom:16px; }
+.chart-card-header { display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px; }
+.chart-card-title { font-size:14px;font-weight:600;color:var(--text);margin-bottom:2px; }
+.chart-card-sub { font-size:12px;color:var(--text3); }
+.chart-canvas-wrap { position:relative;height:260px; }
+.chart-canvas-wrap.tall { height:320px; }
+.charts-2col { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px; }
+@media(max-width:760px){ .charts-2col { grid-template-columns:1fr; } }
+
+/* Forecast eval KPIs */
+.eval-row { display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px; }
+.eval-kpi { background:linear-gradient(135deg,var(--blue-t),rgba(37,99,235,0.04));border:1px solid rgba(37,99,235,0.15);border-radius:var(--radius);padding:14px;text-align:center; }
+.eval-kpi-label { font-size:11px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.05em; }
+.eval-kpi-value { font-size:22px;font-weight:700;color:var(--text);margin-top:4px;font-family:var(--mono); }
+
+/* Skeleton */
+.skeleton { background:linear-gradient(90deg,var(--bg) 25%,var(--border) 50%,var(--bg) 75%);background-size:400% 100%;animation:shimmer 1.4s infinite;border-radius:var(--radius); }
+@keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:5px;height:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border2);border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:var(--slate2); }
+
+/* ── Backward-compat aliases from analytics module ── */
+.chart-wrap { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow);margin-bottom:16px; }
+.chart-title { font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px; }
+.chart-subtitle { font-size:12px;color:var(--text3);margin-bottom:16px; }
+.stat-card { background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px; }
+.stat-card-lbl { font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px; }
+.stat-card-val { font-size:17px;font-weight:700;color:var(--text);font-family:var(--mono); }
+.quality-lbl { color:var(--text2); }
+.quality-val { font-weight:600;color:var(--text);font-family:var(--mono); }
+.chart-canvas-wrap { position:relative;height:280px; }
+.charts-2col { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
+@media(max-width:760px){.charts-2col{grid-template-columns:1fr}}
+.eval-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px; }
+.eval-card { background:var(--blue-t);border:1px solid rgba(37,99,235,.15);border-radius:var(--radius);padding:12px;text-align:center; }
+.eval-card-lbl { font-size:11px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.05em; }
+.eval-card-val { font-size:20px;font-weight:700;color:var(--text);margin-top:4px;font-family:var(--mono); }
+.analytics-placeholder { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:50px 20px;text-align:center;box-shadow:var(--shadow); }
 </style>
 </head>
 <body>
 
-<!-- ── Header ────────────────────────────────────────────────────────────── -->
-<header class="site-header">
-  <div class="header-inner">
-    <div class="header-icon">
-      <svg viewBox="0 0 24 24"><path d="M3 15a4 4 0 004 4h9a5 5 0 10-4.9-6H7a4 4 0 00-4 4z"/><path d="M12 3v2M12 12v-2M4.22 6.22l1.42 1.42M18.36 7.64l1.41-1.41M2 12h2M20 12h2"/></svg>
-    </div>
-    <div class="header-text">
-      <h1>Weather Archive</h1>
-      <p>Historical Climate Data Exporter</p>
-    </div>
-    <div class="header-right">
-      <span class="badge">Open-Meteo API</span>
-    </div>
-  </div>
-</header>
+<!-- ════════════════════════════════════════════════════════════
+     APP SHELL
+════════════════════════════════════════════════════════════ -->
+<div class="app-shell">
 
-<!-- ── Hero strip ─────────────────────────────────────────────────────────── -->
-<div class="page-hero">
-  <div class="page-hero-inner">
-    <h2>Fetch Historical Weather Data</h2>
-    <p>Query archival climate records for multiple locations and export structured data directly to Excel — no API key required.</p>
-    <div class="hero-stats">
-      <div class="hero-stat"><div class="hero-stat-val" id="stat-locs">0</div><div class="hero-stat-lbl">Locations</div></div>
-      <div class="hero-stat"><div class="hero-stat-val" id="stat-metrics">3</div><div class="hero-stat-lbl">Metrics Selected</div></div>
-      <div class="hero-stat"><div class="hero-stat-val" id="stat-records">—</div><div class="hero-stat-lbl">Records Fetched</div></div>
+<!-- ── Sidebar ─────────────────────────────────────────────── -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">
+      <svg viewBox="0 0 24 24"><path d="M3 15a4 4 0 004 4h9a5 5 0 10-4.9-6H7a4 4 0 00-4 4z"/></svg>
     </div>
-  </div>
-</div>
-
-<div class="page-wrap">
-
-  <!-- ── Alert messages ──────────────────────────────────────────────────── -->
-  <div class="alert alert-error" id="alertError">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    <div class="alert-body" id="alertErrorText"></div>
-  </div>
-  <div class="alert alert-success" id="alertSuccess">
-    <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    <div class="alert-body" id="alertSuccessText"></div>
+    <div class="brand-name">Weather<span>Arc</span></div>
   </div>
 
-  <!-- ── Main grid ───────────────────────────────────────────────────────── -->
-  <div class="main-grid">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse">
+    <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
 
-    <!-- Left: Config -->
-    <div style="display:flex;flex-direction:column;gap:20px">
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Workflow</div>
 
-      <!-- Location card -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-header-icon blue">
-            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-          </div>
-          <div>
-            <div class="card-title">Locations</div>
-            <div class="card-subtitle">Add one or more locations to query</div>
-          </div>
+    <div class="nav-item active" id="nav-fetch" onclick="switchPageTab('fetch')">
+      <div class="nav-step-dot">1</div>
+      <div class="nav-item-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+      </div>
+      <span class="nav-item-label">Data Fetch</span>
+      <span class="nav-item-badge" id="nav-fetch-badge">—</span>
+    </div>
+
+    <div class="nav-item locked" id="nav-preview" onclick="switchPageTab('preview')">
+      <div class="nav-step-dot">2</div>
+      <div class="nav-item-icon">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      </div>
+      <span class="nav-item-label">Data Preview</span>
+      <div class="nav-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+    </div>
+
+    <div class="nav-item locked" id="nav-export" onclick="switchPageTab('export')">
+      <div class="nav-step-dot">3</div>
+      <div class="nav-item-icon">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </div>
+      <span class="nav-item-label">Export</span>
+      <div class="nav-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+    </div>
+
+    <div class="nav-item locked" id="nav-analytics" onclick="switchPageTab('analytics')">
+      <div class="nav-step-dot">4</div>
+      <div class="nav-item-icon">
+        <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </div>
+      <span class="nav-item-label">Analytics</span>
+      <div class="nav-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="sidebar-badge">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+      <span>Open-Meteo API</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Mobile overlay -->
+<div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
+
+<!-- ── Main content ──────────────────────────────────────────── -->
+<div class="main-content" id="mainContent">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <button class="hamburger" id="hamburgerBtn" onclick="openMobileSidebar()">
+      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="topbar-breadcrumb">
+      <strong id="topbar-section-name">Data Fetch</strong>
+    </div>
+    <div class="topbar-actions">
+      <!-- Pipeline progress -->
+      <div class="pipeline" id="pipeline">
+        <div class="pipeline-step active" id="pipe-fetch">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+          Fetch
         </div>
-        <div class="card-body">
-          <!-- Method tabs -->
-          <div class="method-tabs">
-            <button class="method-tab active" onclick="switchTab('manual')">✎ Manual Entry</button>
-            <button class="method-tab" onclick="switchTab('import')">↑ Import Excel</button>
+        <div class="pipeline-arrow">›</div>
+        <div class="pipeline-step" id="pipe-preview">Preview</div>
+        <div class="pipeline-arrow">›</div>
+        <div class="pipeline-step" id="pipe-export">Export</div>
+        <div class="pipeline-arrow">›</div>
+        <div class="pipeline-step" id="pipe-analytics">Analytics</div>
+      </div>
+      <div class="topbar-status" id="topbarStatus">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">No data</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-content">
+
+    <!-- Global alerts -->
+    <div class="alert alert-error" id="alertError">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div class="alert-body" id="alertErrorText"></div>
+    </div>
+    <div class="alert alert-success" id="alertSuccess">
+      <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      <div class="alert-body" id="alertSuccessText"></div>
+    </div>
+
+    <!-- ═══════ SECTION: FETCH ═══════ -->
+    <div class="page-section active" id="section-fetch">
+      <div class="fetch-grid">
+
+        <!-- LEFT: Locations + Date + Type -->
+        <div style="display:flex;flex-direction:column;gap:16px">
+
+          <!-- Locations -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-icon blue"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+              <div><div class="card-title">Locations</div><div class="card-desc">Add one or more query locations</div></div>
+            </div>
+            <div class="card-body">
+              <div class="method-tabs">
+                <button class="method-tab active" onclick="switchTab('manual')">✎ Manual Entry</button>
+                <button class="method-tab" onclick="switchTab('import')">↑ Import Excel</button>
+              </div>
+              <div class="tab-pane active" id="tab-manual">
+                <div class="loc-list" id="locationsList"></div>
+                <button class="btn-add-loc" onclick="addLocation()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add Another Location
+                </button>
+              </div>
+              <div class="tab-pane" id="tab-import">
+                <div class="import-zone" id="importZone">
+                  <p style="font-size:28px;margin-bottom:8px">📂</p>
+                  <p>Download template, fill in locations, then upload here.<br>Drag &amp; drop supported.</p>
+                  <div class="import-actions">
+                    <button class="btn btn-outline-blue btn-sm" onclick="downloadTemplate()">
+                      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      Download Template
+                    </button>
+                    <label class="btn btn-ghost btn-sm" for="uploadInput" style="cursor:pointer">
+                      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      Upload
+                    </label>
+                    <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="handleUpload(this)">
+                  </div>
+                  <div class="import-feedback" id="importFeedback"></div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- Manual tab -->
-          <div class="tab-pane active" id="tab-manual">
-            <div class="loc-list" id="locationsList"></div>
-            <button class="btn-add-loc" onclick="addLocation()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Add Another Location
+          <!-- Date Range -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-icon amber"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+              <div><div class="card-title">Date Range</div><div class="card-desc">Applies to all locations</div></div>
+            </div>
+            <div class="card-body">
+              <div class="input-row">
+                <div class="field">
+                  <label class="field-label">Start Date <span>*</span></label>
+                  <div class="input-wrap">
+                    <div class="input-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                    <input type="date" class="input" id="startDate">
+                  </div>
+                  <div class="field-error" id="err-startDate"></div>
+                </div>
+                <div class="field">
+                  <label class="field-label">End Date <span>*</span></label>
+                  <div class="input-wrap">
+                    <div class="input-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                    <input type="date" class="input" id="endDate">
+                  </div>
+                  <div class="field-error" id="err-endDate"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Type -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-icon green"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+              <div><div class="card-title">Data Resolution</div><div class="card-desc">Select one or both</div></div>
+            </div>
+            <div class="card-body" style="display:flex;gap:10px">
+              <label class="type-toggle-card" style="flex:1">
+                <input type="checkbox" id="chkHourly" checked style="display:none">
+                <div class="ttc-inner active" id="ttcHourly">
+                  <div class="ttc-check" id="ttcCheckH">✓</div>
+                  <div class="ttc-icon">⏱</div>
+                  <div class="ttc-label">Hourly</div>
+                  <div class="ttc-desc">24 pts/day</div>
+                </div>
+              </label>
+              <label class="type-toggle-card" style="flex:1">
+                <input type="checkbox" id="chkDaily" style="display:none">
+                <div class="ttc-inner" id="ttcDaily">
+                  <div class="ttc-check" id="ttcCheckD" style="opacity:0">✓</div>
+                  <div class="ttc-icon">📅</div>
+                  <div class="ttc-label">Daily</div>
+                  <div class="ttc-desc">1 pt/day</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+        </div><!-- /left col -->
+
+        <!-- RIGHT: Metric selection -->
+        <div class="card" style="display:flex;flex-direction:column">
+          <div class="card-header">
+            <div class="card-icon violet"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+            <div><div class="card-title">Metric Selection</div><div class="card-desc">Choose variables to fetch</div></div>
+          </div>
+          <div class="metric-tabs">
+            <button class="metric-tab active" id="mtab-hourly" onclick="switchMetricTab('hourly')">
+              Hourly <span class="metric-cnt" id="cnt-hourly">3</span>
+            </button>
+            <button class="metric-tab" id="mtab-daily" onclick="switchMetricTab('daily')">
+              Daily <span class="metric-cnt" id="cnt-daily">0</span>
             </button>
           </div>
-
-          <!-- Import tab -->
-          <div class="tab-pane" id="tab-import">
-            <div class="import-zone" id="importZone">
-              <div class="import-zone-icon">📂</div>
-              <p>Download the template, fill in location names and coordinates, then upload it here.<br>Drag &amp; drop supported.</p>
-              <div class="import-actions">
-                <button class="btn btn-outline-blue" onclick="downloadTemplate()">
-                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  Download Template
-                </button>
-                <label class="btn btn-ghost" for="uploadInput" style="cursor:pointer">
-                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                  Upload Template
-                </label>
-                <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="handleUpload(this)">
-              </div>
-              <div class="import-feedback" id="importFeedback"></div>
+          <div class="metric-controls">
+            <div class="metric-search-wrap">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="metric-search" id="metricSearch" placeholder="Search metrics…" oninput="filterMetrics()">
             </div>
+            <button class="btn-sm-ctrl" onclick="selectAllMetrics(true)">All</button>
+            <button class="btn-sm-ctrl" onclick="selectAllMetrics(false)">Clear</button>
+          </div>
+          <div class="metric-grid" id="metricGrid"></div>
+          <div class="metric-footer">
+            <span>Selected: <strong id="totalSelected">3</strong></span>
+            <span id="metricTabHint" style="font-size:11px;color:var(--text4)">Switch tab for daily</span>
+          </div>
+        </div>
+
+      </div><!-- /fetch-grid -->
+
+      <!-- Action bar -->
+      <div class="action-bar" style="margin-top:16px">
+        <div class="action-bar-left">
+          <button class="btn btn-primary" id="fetchBtn" onclick="fetchAllData()">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+            Fetch Weather Data
+          </button>
+          <button class="btn btn-ghost" onclick="resetForm()">
+            <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+            Reset
+          </button>
+        </div>
+        <div class="action-bar-right">
+          <div class="spinner-wrap" id="spinner"><div class="spin"></div><span id="spinnerText">Fetching…</span></div>
+          <div class="progress-wrap" id="progressWrap">
+            <div class="progress-label"><span id="progressLabel">…</span><span id="progressPct">0%</span></div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
           </div>
         </div>
       </div>
 
-      <!-- Date range card -->
+      <div id="results">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">🌤</div>
+          <div class="empty-title">No Data Yet</div>
+          <div class="empty-desc">Configure locations, date range, and metrics above, then click <strong>Fetch Weather Data</strong>.</div>
+        </div>
+      </div>
+    </div><!-- /section-fetch -->
+
+    <!-- ═══════ SECTION: PREVIEW ═══════ -->
+    <div class="page-section" id="section-preview">
       <div class="card">
         <div class="card-header">
-          <div class="card-header-icon amber">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <div class="card-icon blue"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+          <div><div class="card-title">Full Data Preview</div><div class="card-desc">All fetched records by location</div></div>
+        </div>
+        <div class="card-body" id="previewContent">
+          <div class="empty-state" style="border:none;box-shadow:none;padding:30px 0">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">No Data</div>
+            <div class="empty-desc">Fetch data first.</div>
           </div>
-          <div>
-            <div class="card-title">Date Range</div>
-            <div class="card-subtitle">Applied to all locations</div>
-          </div>
+        </div>
+      </div>
+    </div><!-- /section-preview -->
+
+    <!-- ═══════ SECTION: EXPORT ═══════ -->
+    <div class="page-section" id="section-export">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon green"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+          <div><div class="card-title">Export to Excel</div><div class="card-desc">Download all fetched data</div></div>
         </div>
         <div class="card-body">
-          <div class="input-row">
-            <div class="field">
-              <label class="field-label">Start Date <span>*</span></label>
-              <div class="input-wrap">
-                <div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
-                <input type="date" class="input" id="startDate">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.6">Each location exports as a separate sheet. Hourly data gets a <code style="background:var(--bg);padding:1px 5px;border-radius:4px;font-family:var(--mono)">_H</code> suffix, daily gets <code style="background:var(--bg);padding:1px 5px;border-radius:4px;font-family:var(--mono)">_D</code>.</p>
+          <div id="exportSummary" style="margin-bottom:16px"></div>
+          <button class="btn btn-success" id="exportBtn" onclick="exportExcel()" disabled>
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export to Excel (.xlsx)
+          </button>
+        </div>
+      </div>
+    </div><!-- /section-export -->
+
+    <!-- ═══════ SECTION: ANALYTICS ═══════ -->
+    <div class="page-section" id="section-analytics">
+
+      <!-- KPI header row -->
+      <div class="an-kpi-row" id="anKpiRow">
+        <div class="an-kpi blue"><div class="an-kpi-label">Dataset</div><div class="an-kpi-value" id="kpi-dataset">—</div></div>
+        <div class="an-kpi"><div class="an-kpi-label">Records</div><div class="an-kpi-value" id="kpi-records">—</div></div>
+        <div class="an-kpi"><div class="an-kpi-label">Date Range</div><div class="an-kpi-value" id="kpi-range" style="font-size:13px">—</div></div>
+        <div class="an-kpi amber"><div class="an-kpi-label">Target Metric</div><div class="an-kpi-value" id="kpi-metric" style="font-size:13px">—</div></div>
+        <div class="an-kpi"><div class="an-kpi-label">Missing</div><div class="an-kpi-value" id="kpi-missing">—</div><div class="an-kpi-sub">values</div></div>
+      </div>
+
+      <div class="analytics-layout">
+
+        <!-- Control panel -->
+        <div class="an-panel">
+          <div class="card">
+            <div class="card-header" style="padding:14px 16px">
+              <div class="card-icon violet"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></div>
+              <div><div class="card-title">Controls</div></div>
+            </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Location</div>
+              <select class="select" id="an-location" onchange="onAnalyticsLocationChange()" style="font-size:13px"></select>
+            </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Dataset</div>
+              <div class="ds-toggle">
+                <button class="ds-btn active" id="ds-btn-hourly" onclick="selectDataset('hourly')">
+                  ⏱ Hourly
+                  <span class="ds-count" id="ds-count-hourly">—</span>
+                </button>
+                <button class="ds-btn" id="ds-btn-daily" onclick="selectDataset('daily')">
+                  📅 Daily
+                  <span class="ds-count" id="ds-count-daily">—</span>
+                </button>
               </div>
-              <div class="field-error" id="err-startDate"></div>
             </div>
-            <div class="field">
-              <label class="field-label">End Date <span>*</span></label>
-              <div class="input-wrap">
-                <div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
-                <input type="date" class="input" id="endDate">
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Target Variable</div>
+              <select class="select" id="an-metric" style="font-size:13px"></select>
+            </div>
+
+            <div class="an-ctrl-section" id="an-agg-section">
+              <div class="ctrl-label">Aggregation</div>
+              <select class="select" id="an-agg" style="font-size:13px">
+                <option value="none">Keep Hourly</option>
+                <option value="mean">Daily Mean</option>
+                <option value="max">Daily Max</option>
+                <option value="min">Daily Min</option>
+                <option value="sum">Daily Sum</option>
+              </select>
+            </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Missing Value Fill</div>
+              <select class="select" id="an-fill" style="font-size:13px">
+                <option value="none">None</option>
+                <option value="ffill" selected>Forward Fill</option>
+                <option value="interpolate">Interpolation</option>
+              </select>
+            </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Date Filter</div>
+              <div class="input-row" style="margin-bottom:6px">
+                <div class="field" style="margin-bottom:0"><input type="date" class="input-sm" id="an-date-start" style="font-size:12px"></div>
+                <div class="field" style="margin-bottom:0"><input type="date" class="input-sm" id="an-date-end" style="font-size:12px"></div>
               </div>
-              <div class="field-error" id="err-endDate"></div>
+              <div class="quick-dates">
+                <button class="quick-date-btn" onclick="setQuickDate(7)">7d</button>
+                <button class="quick-date-btn" onclick="setQuickDate(30)">30d</button>
+                <button class="quick-date-btn active" onclick="setQuickDate(0)">All</button>
+              </div>
             </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">Forecast Model</div>
+              <select class="select" id="an-model" style="font-size:13px">
+                <option value="ma">Moving Average</option>
+                <option value="linear">Linear Regression</option>
+                <option value="poly2">Polynomial (deg 2)</option>
+                <option value="poly3">Polynomial (deg 3)</option>
+                <option value="exp">Exponential Smoothing</option>
+              </select>
+            </div>
+
+            <div class="an-ctrl-section">
+              <div class="ctrl-label">
+                Forecast Horizon
+                <span id="an-horizon-hint" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px">7 days</span>
+              </div>
+              <input type="range" id="an-horizon-slider" min="1" max="90" value="7" style="width:100%;margin-bottom:4px;accent-color:var(--blue)" oninput="syncHorizon(this.value)">
+              <input type="number" class="input-sm" id="an-horizon" value="7" min="1" max="365" style="font-size:13px" oninput="syncHorizon(this.value)">
+            </div>
+
+            <div class="an-ctrl-section" style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-primary" onclick="runAnalysis()" id="an-run-btn" style="justify-content:center">
+                <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Run Analysis
+              </button>
+              <button class="btn btn-success" onclick="runForecast()" id="an-forecast-btn" style="justify-content:center">
+                <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Run Forecast
+              </button>
+              <button class="btn btn-ghost" onclick="resetAnalytics()" style="justify-content:center">
+                <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                Reset
+              </button>
+              <button class="btn btn-outline-green" id="an-export-btn" onclick="exportAnalysis()" disabled style="justify-content:center">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export Analysis
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /an-panel -->
+
+        <!-- Output area -->
+        <div id="analyticsOutputs">
+          <div class="empty-state">
+            <div class="empty-icon">📊</div>
+            <div class="empty-title">Ready to Analyze</div>
+            <div class="empty-desc">Select a location and metric on the left, then click <strong>Run Analysis</strong>.</div>
           </div>
         </div>
-      </div>
 
-      <!-- Data type card -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-header-icon green">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-          </div>
-          <div>
-            <div class="card-title">Data Resolution</div>
-            <div class="card-subtitle">Select one or both</div>
-          </div>
-        </div>
-        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap">
-          <label class="type-toggle-card" id="toggleHourly" style="flex:1">
-            <input type="checkbox" id="chkHourly" checked style="display:none">
-            <div class="ttc-inner active" id="ttcHourly">
-              <div class="ttc-icon">⏱</div>
-              <div class="ttc-label">Hourly</div>
-              <div class="ttc-desc">24 data points/day</div>
-              <div class="ttc-check" id="ttcCheckH">✓</div>
-            </div>
-          </label>
-          <label class="type-toggle-card" id="toggleDaily" style="flex:1">
-            <input type="checkbox" id="chkDaily" style="display:none">
-            <div class="ttc-inner" id="ttcDaily">
-              <div class="ttc-icon">📅</div>
-              <div class="ttc-label">Daily</div>
-              <div class="ttc-desc">1 data point/day</div>
-              <div class="ttc-check" id="ttcCheckD" style="opacity:0">✓</div>
-            </div>
-          </label>
-        </div>
-      </div>
+      </div><!-- /analytics-layout -->
+    </div><!-- /section-analytics -->
 
-    </div><!-- /left -->
+  </div><!-- /page-content -->
+</div><!-- /main-content -->
+</div><!-- /app-shell -->
 
-    <!-- Right: Metric selection -->
-    <div class="card" style="display:flex;flex-direction:column">
-      <div class="card-header">
-        <div class="card-header-icon blue">
-          <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        </div>
-        <div>
-          <div class="card-title">Metric Selection</div>
-          <div class="card-subtitle">Choose variables to fetch</div>
-        </div>
-      </div>
-
-      <!-- Metric tabs -->
-      <div class="metric-tabs">
-        <button class="metric-tab active" id="mtab-hourly" onclick="switchMetricTab('hourly')">
-          Hourly <span class="cnt" id="cnt-hourly">3</span>
-        </button>
-        <button class="metric-tab" id="mtab-daily" onclick="switchMetricTab('daily')">
-          Daily <span class="cnt" id="cnt-daily">0</span>
-        </button>
-      </div>
-
-      <!-- Search & controls -->
-      <div class="metric-controls">
-        <div class="metric-search-wrap">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="metric-search" id="metricSearch" placeholder="Search metrics…" oninput="filterMetrics()">
-        </div>
-        <button class="btn-sm" onclick="selectAllMetrics(true)">Select All</button>
-        <button class="btn-sm" onclick="selectAllMetrics(false)">Clear</button>
-      </div>
-
-      <!-- Metric grid -->
-      <div class="metric-grid" id="metricGrid"></div>
-
-      <!-- Footer -->
-      <div class="metric-footer">
-        <span>Selected: <strong id="totalSelected">3</strong> metrics</span>
-        <span id="metricTabHint" style="color:var(--c-text3);font-size:11px">Switch tab for daily metrics</span>
-      </div>
-    </div>
-
-  </div><!-- /main-grid -->
-
-  <!-- ── Action bar ────────────────────────────────────────────────────────── -->
-  <div class="action-bar">
-    <div class="action-bar-left">
-      <button class="btn btn-primary" id="fetchBtn" onclick="fetchAllData()">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
-        Fetch Weather Data
-      </button>
-      <button class="btn btn-success" id="exportBtn" onclick="exportExcel()" disabled>
-        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Export to Excel
-      </button>
-      <button class="btn btn-ghost" onclick="resetForm()">
-        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-        Reset
-      </button>
-    </div>
-    <div class="action-bar-right">
-      <div class="spinner-wrap" id="spinner">
-        <div class="spin"></div>
-        <span id="spinnerText">Fetching…</span>
-      </div>
-      <div class="progress-wrap" id="progressWrap">
-        <div class="progress-label">
-          <span id="progressLabel">Fetching locations…</span>
-          <span id="progressPct">0%</span>
-        </div>
-        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Results ───────────────────────────────────────────────────────────── -->
-  <div id="results">
-    <div class="empty-state" id="emptyState">
-      <div class="empty-icon">🌤</div>
-      <div class="empty-title">No Data Yet</div>
-      <div class="empty-desc">Configure your locations, date range, and metrics above, then click <strong>Fetch Weather Data</strong> to load results.</div>
-    </div>
-  </div>
-
-</div><!-- /page-wrap -->
-
-<!-- Toggle card style -->
-<style>
-.type-toggle-card{cursor:pointer;display:block}
-.ttc-inner{
-  border:1.5px solid var(--c-border);border-radius:var(--radius);
-  padding:14px;text-align:center;transition:all .15s;
-  background:var(--c-surface2);position:relative;
-}
-.ttc-inner:hover{border-color:var(--c-border2)}
-.ttc-inner.active{border-color:var(--c-blue);background:var(--c-blue-t)}
-.ttc-icon{font-size:22px;margin-bottom:5px}
-.ttc-label{font-size:14px;font-weight:600;color:var(--c-text)}
-.ttc-desc{font-size:11px;color:var(--c-text3);margin-top:2px}
-.ttc-check{position:absolute;top:8px;right:10px;font-size:13px;color:var(--c-blue);font-weight:700}
-</style>
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────
 const HOURLY_METRICS = [
   {id:'temperature_2m',       label:'Temperature 2m',     unit:'°C'},
   {id:'relative_humidity_2m', label:'Relative Humidity',  unit:'%'},
@@ -738,7 +1114,7 @@ let activeMetricTab = 'hourly';
 let checkedHourly = new Set(['temperature_2m','relative_humidity_2m','precipitation']);
 let checkedDaily  = new Set();
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// Init
 const today = new Date(), past = new Date(today);
 past.setDate(today.getDate()-30);
 document.getElementById('endDate').value   = today.toISOString().slice(0,10);
@@ -746,7 +1122,153 @@ document.getElementById('startDate').value = past.toISOString().slice(0,10);
 DEFAULT_LOCS.forEach(l => addLocation(l));
 renderMetricGrid();
 updateStats();
-syncMetricTabsToDataType(); // hide Daily tab on init since only Hourly is checked by default
+syncMetricTabsToDataType();
+
+// ── Sidebar ──────────────────────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+function openMobileSidebar() {
+  document.getElementById('sidebar').classList.add('mobile-open');
+  document.getElementById('mobileOverlay').classList.add('visible');
+}
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('mobileOverlay').classList.remove('visible');
+}
+
+// ── Page navigation ──────────────────────────────────────────────────
+const PAGE_NAMES = { fetch:'Data Fetch', preview:'Data Preview', export:'Export', analytics:'Analytics & Modeling' };
+function switchPageTab(tab) {
+  ['fetch','preview','export','analytics'].forEach(t => {
+    document.getElementById('nav-'+t).classList.toggle('active', t===tab);
+    document.getElementById('section-'+t).classList.toggle('active', t===tab);
+    document.getElementById('pipe-'+t)?.classList.toggle('active', t===tab);
+  });
+  document.getElementById('topbar-section-name').textContent = PAGE_NAMES[tab] || tab;
+  if (tab === 'preview') renderPreviewSection();
+  if (tab === 'export') renderExportSummary();
+  if (tab === 'analytics') initAnalyticsPanel();
+}
+
+function enableDataTabs() {
+  ['preview','export','analytics'].forEach(id => {
+    const el = document.getElementById('nav-'+id);
+    el.classList.remove('locked');
+    el.querySelector('.nav-lock')?.remove();
+  });
+  document.getElementById('statusDot').classList.add('ready');
+  document.getElementById('statusText').textContent = allResults.length+' location(s) ready';
+  document.getElementById('nav-fetch-badge').textContent = allResults.length;
+  // Mark fetch as done
+  document.getElementById('nav-fetch').classList.add('done');
+  document.getElementById('exportBtn').disabled = false;
+}
+// alias for legacy call
+function enableAnalyticsTab() { enableDataTabs(); }
+
+// ── Toast ────────────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const tc = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast '+(type==='error'?'error':'success');
+  const icon = type==='error'
+    ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+  el.innerHTML = icon + '<span>'+msg+'</span>';
+  tc.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(8px)'; el.style.transition='.25s'; setTimeout(()=>el.remove(),260); }, 3500);
+}
+
+// ── Messages ─────────────────────────────────────────────────────────
+function showError(msg) {
+  const el=document.getElementById('alertError');
+  document.getElementById('alertErrorText').textContent=msg;
+  el.classList.add('visible');
+  document.getElementById('alertSuccess').classList.remove('visible');
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function showSuccess(msg) {
+  document.getElementById('alertSuccess').classList.remove('visible');
+  document.getElementById('alertError').classList.remove('visible');
+  toast(msg, 'success');
+}
+function hideAlerts() {
+  document.getElementById('alertError').classList.remove('visible');
+  document.getElementById('alertSuccess').classList.remove('visible');
+}
+function fieldErr(id,msg) {
+  const el=document.getElementById('err-'+id); if(!el)return;
+  el.textContent=msg; el.classList.toggle('visible',!!msg);
+  const inp=document.getElementById(id); if(inp)inp.classList.toggle('error',!!msg);
+}
+function clearAllErrors() {
+  document.querySelectorAll('.field-error').forEach(e=>{e.textContent='';e.classList.remove('visible')});
+  document.querySelectorAll('.input.error').forEach(i=>i.classList.remove('error'));
+}
+
+// ── Horizon slider sync ──────────────────────────────────────────────
+function syncHorizon(val) {
+  document.getElementById('an-horizon').value = val;
+  document.getElementById('an-horizon-slider').value = Math.min(val, 90);
+  const ds = anState?.dataset || 'daily';
+  document.getElementById('an-horizon-hint').textContent = val+' '+(ds==='hourly'?'hours':'days');
+}
+
+// ── Quick date filters ───────────────────────────────────────────────
+function setQuickDate(days) {
+  document.querySelectorAll('.quick-date-btn').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  if (!allResults.length) return;
+  const r = allResults[anState?.locationIdx||0];
+  const ds = anState?.dataset==='hourly' ? r?.data?.hourly : r?.data?.daily;
+  if (!ds?.time?.length) return;
+  const times = ds.time;
+  const end = times[times.length-1].slice(0,10);
+  if (days===0) {
+    document.getElementById('an-date-start').value = times[0].slice(0,10);
+    document.getElementById('an-date-end').value   = end;
+  } else {
+    const d = new Date(end); d.setDate(d.getDate()-days+1);
+    document.getElementById('an-date-start').value = d.toISOString().slice(0,10);
+    document.getElementById('an-date-end').value   = end;
+  }
+}
+
+// ── Export summary ───────────────────────────────────────────────────
+function renderExportSummary() {
+  const c = document.getElementById('exportSummary');
+  if (!allResults.length) { c.innerHTML=''; return; }
+  const rows = allResults.map((r,i)=>`
+    <tr>
+      <td><span style="width:8px;height:8px;border-radius:50%;background:${r.color};display:inline-block;margin-right:6px"></span>${r.name}</td>
+      <td style="font-family:var(--mono)">${r.lat}°, ${r.lon}°</td>
+      <td>${r.data.hourly?.time?.length ? r.data.hourly.time.length.toLocaleString()+' hourly' : '—'}</td>
+      <td>${r.data.daily?.time?.length  ? r.data.daily.time.length.toLocaleString()+' daily' : '—'}</td>
+    </tr>`).join('');
+  c.innerHTML = `<div class="table-card"><div class="table-wrap"><table>
+    <thead><tr><th>Location</th><th>Coordinates</th><th>Hourly</th><th>Daily</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div></div>`;
+}
+
+// ── Preview section ──────────────────────────────────────────────────
+function renderPreviewSection() {
+  const c = document.getElementById('previewContent');
+  if (!allResults.length) { c.innerHTML='<div class="empty-state" style="border:none;box-shadow:none;padding:20px 0"><div class="empty-icon">📋</div><div class="empty-title">No Data</div></div>'; return; }
+  c.innerHTML='';
+  allResults.forEach(r=>{
+    const wrap=document.createElement('div'); wrap.style.marginBottom='20px';
+    const lbl=document.createElement('div');
+    lbl.style.cssText='font-size:14px;font-weight:600;color:'+r.color+';margin-bottom:10px;display:flex;align-items:center;gap:8px';
+    lbl.innerHTML=`<span style="width:10px;height:10px;border-radius:50%;background:${r.color};display:inline-block"></span>${r.name}<span style="font-size:12px;color:var(--text3);font-family:var(--mono)">${r.lat}°, ${r.lon}°</span>`;
+    wrap.appendChild(lbl);
+    if(r.data.hourly?.time?.length)wrap.appendChild(buildTableCard(r.data.hourly,HOURLY_METRICS));
+    if(r.data.daily?.time?.length){const d=buildTableCard(r.data.daily,DAILY_METRICS);d.style.marginTop='10px';wrap.appendChild(d);}
+    c.appendChild(wrap);
+  });
+}
+
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -1017,6 +1539,7 @@ async function fetchAllData() {
   if(allResults.length){
     renderResults();
     document.getElementById('exportBtn').disabled=false;
+    enableAnalyticsTab();
     const totalH=allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
     const totalD=allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
     const parts=[];if(totalH)parts.push(totalH.toLocaleString()+' hourly');if(totalD)parts.push(totalD.toLocaleString()+' daily');
@@ -1200,6 +1723,541 @@ document.addEventListener('DOMContentLoaded',()=>{
     handleUpload({files:[f],value:''});
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAGE-LEVEL TAB NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════════════
+function switchPageTab(tab) {
+  ['fetch','preview','analytics'].forEach(t => {
+    document.getElementById('nav'+t.charAt(0).toUpperCase()+t.slice(1)).classList.toggle('active', t===tab);
+    document.getElementById('section-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab === 'preview') renderPreviewSection();
+  if (tab === 'analytics') initAnalyticsPanel();
+}
+
+function renderPreviewSection() {
+  const c = document.getElementById('previewContent');
+  if (!allResults.length) { c.innerHTML = '<div class="empty-state" style="padding:30px 0;border:none;box-shadow:none"><div class="empty-icon">📋</div><div class="empty-title">No Data Yet</div><div class="empty-desc">Fetch data first.</div></div>'; return; }
+  c.innerHTML = '';
+  allResults.forEach(r => {
+    const wrap = document.createElement('div'); wrap.style.marginBottom='20px';
+    const lbl = document.createElement('div');
+    lbl.style.cssText='font-size:14px;font-weight:600;color:'+r.color+';margin-bottom:10px;display:flex;align-items:center;gap:8px';
+    lbl.innerHTML = `<span style="width:10px;height:10px;border-radius:50%;background:${r.color};display:inline-block"></span>${r.name} <span style="font-size:12px;color:var(--c-text3);font-family:var(--mono)">${r.lat}°, ${r.lon}°</span>`;
+    wrap.appendChild(lbl);
+    if (r.data.hourly?.time?.length) { wrap.appendChild(buildTableCard(r.data.hourly, HOURLY_METRICS)); }
+    if (r.data.daily?.time?.length)  { const d=buildTableCard(r.data.daily, DAILY_METRICS); d.style.marginTop='10px'; wrap.appendChild(d); }
+    c.appendChild(wrap);
+  });
+}
+
+// enable analytics nav when data exists
+function enableAnalyticsTab() {
+  document.getElementById('navAnalytics').disabled = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ANALYTICS — STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+let anState = {
+  locationIdx: 0,
+  dataset: 'hourly',
+  metric: null,
+  series: [],      // [{time, value}] — processed working series
+  forecastResult: null,
+  charts: {}       // keyed chart instances
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ANALYTICS — INIT PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function initAnalyticsPanel() {
+  if (!allResults.length) return;
+  // Populate location dropdown
+  const sel = document.getElementById('an-location');
+  sel.innerHTML = allResults.map((r,i) => `<option value="${i}">${r.name}</option>`).join('');
+  onAnalyticsLocationChange();
+}
+
+function onAnalyticsLocationChange() {
+  anState.locationIdx = parseInt(document.getElementById('an-location').value) || 0;
+  const r = allResults[anState.locationIdx];
+  // Enable/disable dataset radios
+  const hasH = !!(r?.data?.hourly?.time?.length);
+  const hasD = !!(r?.data?.daily?.time?.length);
+  document.getElementById('an-radio-hourly').classList.toggle('disabled', !hasH);
+  if (!hasH && hasD) selectDataset('daily');
+  else if (hasH) selectDataset('hourly');
+  populateMetricDropdown();
+}
+
+function selectDataset(ds) {
+  anState.dataset = ds;
+  document.getElementById('an-radio-hourly').classList.toggle('selected', ds==='hourly');
+  document.getElementById('an-radio-daily').classList.toggle('selected', ds==='daily');
+  document.getElementById('an-agg-section').style.display = ds==='hourly' ? '' : 'none';
+  document.getElementById('an-horizon-hint').textContent = 'Next ' + document.getElementById('an-horizon').value + (ds==='hourly' ? ' hours' : ' days');
+  populateMetricDropdown();
+}
+
+function onMetricChange() { /* nothing auto — user clicks Run */ }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const h = document.getElementById('an-horizon');
+  if (h) h.addEventListener('input', () => {
+    const ds = anState.dataset;
+    document.getElementById('an-horizon-hint').textContent = 'Next '+h.value+(ds==='hourly'?' hours':' days');
+  });
+});
+
+function populateMetricDropdown() {
+  const r = allResults[anState.locationIdx];
+  const dataset = anState.dataset === 'hourly' ? r?.data?.hourly : r?.data?.daily;
+  const sel = document.getElementById('an-metric');
+  if (!dataset) { sel.innerHTML='<option>No data available</option>'; return; }
+  const keys = Object.keys(dataset).filter(k => k !== 'time');
+  const defs = anState.dataset === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
+  sel.innerHTML = keys.map(k => {
+    const d = defs.find(m => m.id===k);
+    return `<option value="${k}">${d ? d.label+' ('+d.unit+')' : k}</option>`;
+  }).join('');
+  anState.metric = sel.value;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA PROCESSING MODULE
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildSeries() {
+  const r = allResults[anState.locationIdx];
+  const metric = document.getElementById('an-metric').value;
+  const dataset = anState.dataset === 'hourly' ? r.data.hourly : r.data.daily;
+  if (!dataset || !metric) return [];
+
+  let series = dataset.time.map((t, i) => ({ time: t, value: dataset[metric][i] }));
+
+  // Fill missing values
+  const fill = document.getElementById('an-fill').value;
+  if (fill === 'ffill') {
+    let last = null;
+    series = series.map(p => {
+      if (p.value !== null && p.value !== undefined) { last = p.value; return p; }
+      return { ...p, value: last };
+    });
+  } else if (fill === 'interpolate') {
+    series = linearInterpolate(series);
+  }
+
+  // Aggregate hourly → daily if requested
+  if (anState.dataset === 'hourly') {
+    const agg = document.getElementById('an-agg').value;
+    if (agg !== 'none') series = aggregateToDaily(series, agg);
+  }
+
+  return series.filter(p => p.value !== null && p.value !== undefined);
+}
+
+function linearInterpolate(series) {
+  const result = [...series];
+  for (let i = 0; i < result.length; i++) {
+    if (result[i].value === null || result[i].value === undefined) {
+      let prev = i - 1, next = i + 1;
+      while (next < result.length && (result[next].value === null || result[next].value === undefined)) next++;
+      if (prev >= 0 && next < result.length) {
+        const range = next - prev;
+        result[i].value = result[prev].value + (result[next].value - result[prev].value) * ((i - prev) / range);
+      } else if (prev >= 0) result[i].value = result[prev].value;
+      else if (next < result.length) result[i].value = result[next].value;
+    }
+  }
+  return result;
+}
+
+function aggregateToDaily(series, method) {
+  const byDay = {};
+  series.forEach(p => {
+    const day = p.time.slice(0, 10);
+    if (!byDay[day]) byDay[day] = [];
+    if (p.value !== null && p.value !== undefined) byDay[day].push(p.value);
+  });
+  return Object.entries(byDay).map(([day, vals]) => {
+    if (!vals.length) return { time: day, value: null };
+    let v;
+    if (method === 'mean') v = vals.reduce((a,b)=>a+b,0)/vals.length;
+    else if (method === 'max') v = Math.max(...vals);
+    else if (method === 'min') v = Math.min(...vals);
+    else if (method === 'sum') v = vals.reduce((a,b)=>a+b,0);
+    return { time: day, value: +v.toFixed(4) };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATISTICS MODULE
+// ═══════════════════════════════════════════════════════════════════════════════
+function computeStats(series) {
+  const vals = series.map(p => p.value).filter(v => v !== null && v !== undefined && !isNaN(v));
+  if (!vals.length) return null;
+  vals.sort((a,b) => a-b);
+  const n = vals.length;
+  const mean = vals.reduce((a,b)=>a+b,0)/n;
+  const variance = vals.reduce((s,v)=>s+(v-mean)**2,0)/n;
+  const std = Math.sqrt(variance);
+  const median = n%2===0 ? (vals[n/2-1]+vals[n/2])/2 : vals[Math.floor(n/2)];
+  const p25 = vals[Math.floor(n*0.25)];
+  const p75 = vals[Math.floor(n*0.75)];
+  const iqr = p75 - p25;
+  const outliers = vals.filter(v => v < p25 - 1.5*iqr || v > p75 + 1.5*iqr);
+  const missing = series.length - vals.length;
+  return { n: series.length, valid: n, missing, mean, median, std, min: vals[0], max: vals[n-1], p25, p75, iqr, outlierCount: outliers.length };
+}
+
+function rollingMean(series, window) {
+  return series.map((p, i) => {
+    if (i < window - 1) return { time: p.time, value: null };
+    const slice = series.slice(i - window + 1, i + 1).map(x => x.value).filter(v => v !== null);
+    return { time: p.time, value: slice.length ? +(slice.reduce((a,b)=>a+b,0)/slice.length).toFixed(4) : null };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODELING MODULE
+// ═══════════════════════════════════════════════════════════════════════════════
+function trainTestSplit(series, testFrac=0.2) {
+  const splitIdx = Math.floor(series.length * (1 - testFrac));
+  return { train: series.slice(0, splitIdx), test: series.slice(splitIdx) };
+}
+
+function runModel(train, test, horizon, method) {
+  const allVals = train.map(p => p.value);
+  const n = train.length;
+  let predicted = [], forecast = [];
+
+  if (method === 'ma') {
+    const w = Math.min(7, Math.floor(n * 0.1) || 3);
+    // in-sample: rolling mean
+    predicted = train.map((p, i) => {
+      if (i < w) return { time: p.time, value: allVals.slice(0,i+1).reduce((a,b)=>a+b,0)/(i+1) };
+      return { time: p.time, value: allVals.slice(i-w+1,i+1).reduce((a,b)=>a+b,0)/w };
+    });
+    // test predictions = mean of last window
+    const lastWindow = allVals.slice(-w);
+    const maVal = lastWindow.reduce((a,b)=>a+b,0)/lastWindow.length;
+    predicted.push(...test.map(p => ({ time: p.time, value: maVal })));
+    // forecast
+    for (let i = 0; i < horizon; i++) forecast.push(maVal);
+
+  } else if (method === 'linear') {
+    const { m, b } = linearRegression(allVals);
+    predicted = [...train, ...test].map((p, i) => ({ time: p.time, value: m*i + b }));
+    const startIdx = n + test.length;
+    for (let i = 0; i < horizon; i++) forecast.push(m*(startIdx+i)+b);
+
+  } else if (method === 'poly2' || method === 'poly3') {
+    const deg = method === 'poly2' ? 2 : 3;
+    const coeffs = polyFit(allVals, deg);
+    predicted = [...train, ...test].map((p, i) => ({ time: p.time, value: polyEval(coeffs, i) }));
+    const startIdx = n + test.length;
+    for (let i = 0; i < horizon; i++) forecast.push(polyEval(coeffs, startIdx+i));
+
+  } else if (method === 'exp') {
+    const alpha = 0.3;
+    let s = allVals[0];
+    const smoothed = allVals.map(v => { s = alpha*v + (1-alpha)*s; return s; });
+    predicted = [...train, ...test].map((p, i) => {
+      if (i < n) return { time: p.time, value: smoothed[i] };
+      return { time: p.time, value: smoothed[n-1] }; // flat forecast from last smoothed
+    });
+    for (let i = 0; i < horizon; i++) forecast.push(smoothed[n-1]);
+  }
+
+  return { predicted, forecast };
+}
+
+function linearRegression(vals) {
+  const n = vals.length;
+  const xs = Array.from({length:n},(_,i)=>i);
+  const xMean = xs.reduce((a,b)=>a+b,0)/n;
+  const yMean = vals.reduce((a,b)=>a+b,0)/n;
+  const num = xs.reduce((s,x,i)=>s+(x-xMean)*(vals[i]-yMean),0);
+  const den = xs.reduce((s,x)=>s+(x-xMean)**2,0);
+  const m = den ? num/den : 0;
+  return { m, b: yMean - m*xMean };
+}
+
+function polyFit(vals, deg) {
+  // Vandermonde matrix — simple least squares via Gaussian elimination
+  const n = vals.length, d = deg+1;
+  const xs = Array.from({length:n},(_,i)=>i/n); // normalize
+  // Build normal equations A^T A x = A^T b
+  const A = Array.from({length:d},(_,r)=>Array.from({length:d+1},(_,c)=>{
+    if (c===d) return xs.reduce((s,x,i)=>s+Math.pow(x,r)*vals[i],0);
+    return xs.reduce((s,x)=>s+Math.pow(x,r+c),0);
+  }));
+  // Gaussian elimination
+  for (let col=0;col<d;col++){
+    let maxRow=col;
+    for(let row=col+1;row<d;row++) if(Math.abs(A[row][col])>Math.abs(A[maxRow][col]))maxRow=row;
+    [A[col],A[maxRow]]=[A[maxRow],A[col]];
+    for(let row=col+1;row<d;row++){const f=A[row][col]/A[col][col];for(let c=col;c<=d;c++)A[row][c]-=f*A[col][c];}
+  }
+  const coeffs=new Array(d);
+  for(let i=d-1;i>=0;i--){coeffs[i]=A[i][d];for(let j=i+1;j<d;j++)coeffs[i]-=A[i][j]*coeffs[j];coeffs[i]/=A[i][i];}
+  return {coeffs,n};
+}
+
+function polyEval({coeffs,n},idx){
+  const x=idx/n;
+  return coeffs.reduce((s,c,i)=>s+c*Math.pow(x,i),0);
+}
+
+function evalMetrics(actual, predicted) {
+  const pairs = actual.map((p,i) => ({ a: p.value, p: predicted[i]?.value })).filter(x=>x.a!==null&&x.p!==null&&!isNaN(x.a)&&!isNaN(x.p));
+  const n = pairs.length; if (!n) return { mae:0, rmse:0, mape:0 };
+  const mae  = pairs.reduce((s,x)=>s+Math.abs(x.a-x.p),0)/n;
+  const rmse = Math.sqrt(pairs.reduce((s,x)=>s+(x.a-x.p)**2,0)/n);
+  const mape = pairs.reduce((s,x)=>s+(x.a!==0?Math.abs((x.a-x.p)/x.a):0),0)/n*100;
+  return { mae: +mae.toFixed(4), rmse: +rmse.toFixed(4), mape: +mape.toFixed(2) };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHART MODULE
+// ═══════════════════════════════════════════════════════════════════════════════
+function destroyChart(key) {
+  if (anState.charts[key]) { anState.charts[key].destroy(); delete anState.charts[key]; }
+}
+
+function makeLineChart(canvasId, key, datasets, labels, title) {
+  destroyChart(key);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  anState.charts[key] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } }, title: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 0, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.04)' } },
+        y: { ticks: { font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.04)' } }
+      },
+      elements: { point: { radius: 0, hoverRadius: 4 }, line: { tension: 0.3 } }
+    }
+  });
+}
+
+function makeBarChart(canvasId, key, labels, data, color) {
+  destroyChart(key);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  anState.charts[key] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color+'cc', borderColor: color, borderWidth: 1 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font:{size:10} }, grid: { display: false } },
+        y: { ticks: { font:{size:10} }, grid: { color: 'rgba(0,0,0,0.04)' } }
+      }
+    }
+  });
+}
+
+function buildHistogram(vals, bins=20) {
+  const min=Math.min(...vals), max=Math.max(...vals), step=(max-min)/bins;
+  const edges=Array.from({length:bins},(_,i)=>min+i*step);
+  const counts=new Array(bins).fill(0);
+  vals.forEach(v=>{let idx=Math.floor((v-min)/step);if(idx>=bins)idx=bins-1;counts[idx]++;});
+  return {labels:edges.map(e=>e.toFixed(1)),counts};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RUN ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════
+function runAnalysis() {
+  anState.metric = document.getElementById('an-metric').value;
+  anState.series = buildSeries();
+  if (!anState.series.length) { alert('No data available for selected metric.'); return; }
+
+  const stats = computeStats(anState.series);
+  const metricLabel = document.getElementById('an-metric').selectedOptions[0]?.text || anState.metric;
+  const locName = allResults[anState.locationIdx].name;
+  const winSize = anState.dataset==='hourly' ? 24 : 7;
+  const rolling = rollingMean(anState.series, winSize);
+
+  const out = document.getElementById('analyticsOutputs');
+  out.innerHTML = `
+    <!-- Summary stats -->
+    <div class="chart-wrap">
+      <div class="chart-title">📊 Summary Statistics</div>
+      <div class="chart-subtitle">${metricLabel} · ${locName} · ${anState.series.length} records</div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-card-lbl">Count</div><div class="stat-card-val">${stats.valid.toLocaleString()}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">Mean</div><div class="stat-card-val">${stats.mean.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">Median</div><div class="stat-card-val">${stats.median.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">Std Dev</div><div class="stat-card-val">${stats.std.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">Min</div><div class="stat-card-val">${stats.min.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">Max</div><div class="stat-card-val">${stats.max.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">P25</div><div class="stat-card-val">${stats.p25.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-card-lbl">P75</div><div class="stat-card-val">${stats.p75.toFixed(2)}</div></div>
+      </div>
+    </div>
+
+    <!-- Data quality -->
+    <div class="chart-wrap">
+      <div class="chart-title">🔍 Data Quality Report</div>
+      <div class="chart-subtitle">Missing values & outlier detection (IQR method)</div>
+      <div class="quality-row"><span class="quality-lbl">Total records</span><span class="quality-val">${stats.n.toLocaleString()}</span></div>
+      <div class="quality-row"><span class="quality-lbl">Valid values</span><span class="quality-val">${stats.valid.toLocaleString()}</span></div>
+      <div class="quality-row"><span class="quality-lbl">Missing values</span><span class="quality-val">${stats.missing > 0 ? '<span class="badge-warn">'+stats.missing+'</span>' : '<span class="badge-ok">0</span>'}</span></div>
+      <div class="quality-row"><span class="quality-lbl">Outliers (IQR)</span><span class="quality-val">${stats.outlierCount > 0 ? '<span class="badge-warn">'+stats.outlierCount+'</span>' : '<span class="badge-ok">0</span>'}</span></div>
+      <div class="quality-row"><span class="quality-lbl">IQR range</span><span class="quality-val">[${stats.p25.toFixed(2)} – ${stats.p75.toFixed(2)}]</span></div>
+    </div>
+
+    <!-- Time series chart -->
+    <div class="chart-wrap">
+      <div class="chart-title">📈 Time Series</div>
+      <div class="chart-subtitle">${metricLabel} with ${winSize}-point rolling mean</div>
+      <div class="chart-canvas-wrap"><canvas id="chartTimeSeries"></canvas></div>
+    </div>
+
+    <!-- Histogram + Rolling mean side by side -->
+    <div class="charts-2col">
+      <div class="chart-wrap">
+        <div class="chart-title">📉 Distribution</div>
+        <div class="chart-subtitle">Histogram (20 bins)</div>
+        <div class="chart-canvas-wrap" style="height:220px"><canvas id="chartHist"></canvas></div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-title">〰 Rolling Mean</div>
+        <div class="chart-subtitle">Window = ${winSize} ${anState.dataset==='hourly'?'hours':'days'}</div>
+        <div class="chart-canvas-wrap" style="height:220px"><canvas id="chartRolling"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Forecast placeholder -->
+    <div id="forecastSection"></div>
+  `;
+
+  // Render time series
+  const labels = anState.series.map(p=>p.time.length>10?p.time.slice(0,16):p.time);
+  makeLineChart('chartTimeSeries','timeseries',[
+    { label: metricLabel, data: anState.series.map(p=>p.value), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.06)', fill:true, borderWidth:1.5 },
+    { label: 'Rolling Mean', data: rolling.map(p=>p.value), borderColor:'#f59e0b', backgroundColor:'transparent', borderWidth:2, borderDash:[5,3] }
+  ], labels, metricLabel);
+
+  // Histogram
+  const histo = buildHistogram(anState.series.map(p=>p.value).filter(v=>v!==null));
+  makeBarChart('chartHist','hist', histo.labels, histo.counts, '#2563eb');
+
+  // Rolling mean only
+  const rollingValid = rolling.filter(p=>p.value!==null);
+  makeLineChart('chartRolling','rolling',[
+    { label: `${winSize}-pt Rolling Mean`, data: rollingValid.map(p=>p.value), borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.08)', fill:true, borderWidth:2 }
+  ], rollingValid.map(p=>p.time.length>10?p.time.slice(0,16):p.time));
+
+  document.getElementById('an-export-btn').disabled = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RUN FORECAST
+// ═══════════════════════════════════════════════════════════════════════════════
+function runForecast() {
+  if (!anState.series.length) { alert('Run Analysis first.'); return; }
+  const horizon = parseInt(document.getElementById('an-horizon').value) || 7;
+  const method  = document.getElementById('an-model').value;
+  const metricLabel = document.getElementById('an-metric').selectedOptions[0]?.text || anState.metric;
+  const { train, test } = trainTestSplit(anState.series, 0.2);
+  const { predicted, forecast } = runModel(train, test, horizon, method);
+  const metrics = evalMetrics(test, predicted.slice(train.length));
+  anState.forecastResult = { train, test, predicted, forecast, metrics, horizon, metricLabel };
+
+  const modelNames = { ma:'Moving Average', linear:'Linear Regression', poly2:'Polynomial (deg 2)', poly3:'Polynomial (deg 3)', exp:'Exponential Smoothing' };
+  const section = document.getElementById('forecastSection');
+  section.innerHTML = `
+    <div class="chart-wrap">
+      <div class="chart-title">🔮 Forecast — ${modelNames[method]}</div>
+      <div class="chart-subtitle">80/20 train-test split · Horizon: ${horizon} ${anState.dataset==='hourly'?'hours':'days'}</div>
+      <div class="eval-grid">
+        <div class="eval-card"><div class="eval-card-lbl">MAE</div><div class="eval-card-val">${metrics.mae}</div></div>
+        <div class="eval-card"><div class="eval-card-lbl">RMSE</div><div class="eval-card-val">${metrics.rmse}</div></div>
+        <div class="eval-card"><div class="eval-card-lbl">MAPE</div><div class="eval-card-val">${metrics.mape}%</div></div>
+      </div>
+      <div class="chart-canvas-wrap" style="height:320px"><canvas id="chartForecast"></canvas></div>
+    </div>
+  `;
+
+  // Build chart labels: historical + future
+  const allSeries = anState.series;
+  const lastTime  = allSeries[allSeries.length-1].time;
+  const futureLabels = Array.from({length:horizon},(_,i)=>`+${i+1}`);
+  const histLabels   = allSeries.map(p=>p.time.length>10?p.time.slice(0,16):p.time);
+  const allLabels    = [...histLabels, ...futureLabels];
+
+  const actualData     = [...allSeries.map(p=>p.value), ...new Array(horizon).fill(null)];
+  const predictedData  = [...predicted.map(p=>p.value!=null?+p.value.toFixed(4):null), ...new Array(horizon).fill(null)];
+  const forecastData   = [...new Array(allSeries.length-1).fill(null), allSeries[allSeries.length-1].value, ...forecast.map(v=>+v.toFixed(4))];
+
+  makeLineChart('chartForecast','forecast',[
+    { label: 'Actual', data: actualData, borderColor:'#2563eb', borderWidth:1.5, backgroundColor:'rgba(37,99,235,0.05)', fill:false },
+    { label: 'Model Fit', data: predictedData, borderColor:'#059669', borderWidth:1.5, borderDash:[4,3], fill:false },
+    { label: 'Forecast', data: forecastData, borderColor:'#f59e0b', borderWidth:2.5, borderDash:[6,2], fill:false, pointRadius:2 }
+  ], allLabels);
+
+  document.getElementById('an-export-btn').disabled = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════
+function exportAnalysis() {
+  const wb = XLSX.utils.book_new();
+  const metric = anState.metric;
+  const series = anState.series;
+
+  // Sheet 1: original_data
+  const r = allResults[anState.locationIdx];
+  const dataset = anState.dataset==='hourly' ? r.data.hourly : r.data.daily;
+  if (dataset) {
+    const keys = Object.keys(dataset).filter(k=>k!=='time');
+    const headers = ['time', ...keys];
+    const rows = dataset.time.map((t,i)=>[t,...keys.map(k=>dataset[k][i]??'')]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers,...rows]), 'original_data');
+  }
+
+  // Sheet 2: cleaned_data
+  if (series.length) {
+    const ws2 = XLSX.utils.aoa_to_sheet([['time', metric], ...series.map(p=>[p.time, p.value])]);
+    XLSX.utils.book_append_sheet(wb, ws2, 'cleaned_data');
+  }
+
+  // Sheet 3: forecast_results
+  if (anState.forecastResult) {
+    const { train, test, predicted, forecast } = anState.forecastResult;
+    const allSer = [...train, ...test];
+    const rows3 = [['time','actual','predicted']];
+    allSer.forEach((p,i) => rows3.push([p.time, p.value, predicted[i]?.value ?? '']));
+    const lastTime = allSer[allSer.length-1].time;
+    forecast.forEach((v,i) => rows3.push([`Forecast+${i+1}`, '', +v.toFixed(4)]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows3), 'forecast_results');
+
+    // Sheet 4: eval_metrics
+    const { mae, rmse, mape } = anState.forecastResult.metrics;
+    const ws4 = XLSX.utils.aoa_to_sheet([['Metric','Value'],['MAE',mae],['RMSE',rmse],['MAPE (%)',mape]]);
+    XLSX.utils.book_append_sheet(wb, ws4, 'evaluation_metrics');
+  }
+
+  XLSX.writeFile(wb, `analytics_${r.name.replace(/\s/g,'_')}_${metric}.xlsx`);
+}
+
+function resetAnalytics() {
+  Object.keys(anState.charts).forEach(k=>destroyChart(k));
+  anState = { locationIdx:0, dataset:'hourly', metric:null, series:[], forecastResult:null, charts:{} };
+  document.getElementById('analyticsOutputs').innerHTML = `<div class="analytics-placeholder"><div class="empty-icon">📊</div><div class="empty-title" style="font-size:16px;font-weight:600;margin-bottom:8px">Ready to Analyze</div><div class="empty-desc">Select a location and metric, then click <strong>Run Analysis</strong>.</div></div>`;
+  document.getElementById('an-export-btn').disabled = true;
+  initAnalyticsPanel();
+}
+
+
 </script>
 </body>
 </html>
