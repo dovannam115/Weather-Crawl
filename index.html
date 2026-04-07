@@ -625,6 +625,46 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
 .eval-card-lbl { font-size:11px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.05em; }
 .eval-card-val { font-size:20px;font-weight:700;color:var(--text);margin-top:4px;font-family:var(--mono); }
 .analytics-placeholder { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:50px 20px;text-align:center;box-shadow:var(--shadow); }
+
+/* ── Section footer nav bar ─────────────────────────────────────── */
+.section-nav-footer {
+  display:flex;align-items:center;justify-content:space-between;
+  margin-top:32px;padding:16px 20px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);
+}
+.section-nav-footer-info {
+  font-size:12px;color:var(--text3);display:flex;align-items:center;gap:6px;
+}
+.section-nav-footer-info svg {
+  width:13px;height:13px;fill:none;stroke:currentColor;
+  stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.5;
+}
+.section-nav-btns { display:flex;gap:8px; }
+.btn-nav {
+  font-family:var(--font);font-size:13px;font-weight:500;
+  border-radius:var(--radius);cursor:pointer;
+  padding:9px 18px;transition:all var(--transition);
+  display:inline-flex;align-items:center;gap:7px;
+  white-space:nowrap;
+}
+.btn-nav svg {
+  width:15px;height:15px;fill:none;stroke:currentColor;
+  stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;
+}
+.btn-nav-prev {
+  background:transparent;color:var(--text2);
+  border:1.5px solid var(--border);
+}
+.btn-nav-prev:hover { border-color:var(--border2);background:var(--bg); }
+.btn-nav-next {
+  background:var(--blue);color:#fff;
+  border:none;box-shadow:0 1px 3px rgba(37,99,235,0.3);
+}
+.btn-nav-next:hover { background:var(--blue-d);box-shadow:0 4px 12px rgba(37,99,235,0.35);transform:translateY(-1px); }
+.btn-nav-next:active { transform:none; }
+.btn-nav-next.locked { background:var(--border2);color:var(--text4);cursor:not-allowed;box-shadow:none; }
+.btn-nav-next.locked:hover { transform:none;box-shadow:none; }
 </style>
 </head>
 <body>
@@ -903,6 +943,19 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
           <div class="empty-desc">Configure locations, date range, and metrics above, then click <strong>Fetch Weather Data</strong>.</div>
         </div>
       </div>
+    <!-- Section footer -->
+    <div class="section-nav-footer">
+      <div class="section-nav-footer-info">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Step 1 of 4 — Fetch data first to unlock the next steps
+      </div>
+      <div class="section-nav-btns">
+        <button class="btn-nav btn-nav-next" id="footer-next-fetch" onclick="goNextFromFetch()">
+          Preview Data
+          <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </div>
     </div><!-- /section-fetch -->
 
     <!-- ═══════ SECTION: PREVIEW ═══════ -->
@@ -920,6 +973,23 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
           </div>
         </div>
       </div>
+    <!-- Section footer -->
+    <div class="section-nav-footer">
+      <div class="section-nav-footer-info">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Step 2 of 4 — Reviewing fetched data
+      </div>
+      <div class="section-nav-btns">
+        <button class="btn-nav btn-nav-prev" onclick="switchPageTab('fetch')">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          Back: Fetch
+        </button>
+        <button class="btn-nav btn-nav-next" onclick="switchPageTab('export')">
+          Export Data
+          <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </div>
     </div><!-- /section-preview -->
 
     <!-- ═══════ SECTION: EXPORT ═══════ -->
@@ -938,6 +1008,23 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
           </button>
         </div>
       </div>
+    <!-- Section footer -->
+    <div class="section-nav-footer">
+      <div class="section-nav-footer-info">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Step 3 of 4 — Download your data or continue to analytics
+      </div>
+      <div class="section-nav-btns">
+        <button class="btn-nav btn-nav-prev" onclick="switchPageTab('preview')">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          Back: Preview
+        </button>
+        <button class="btn-nav btn-nav-next" onclick="switchPageTab('analytics')">
+          Analytics &amp; Modeling
+          <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </div>
     </div><!-- /section-export -->
 
     <!-- ═══════ SECTION: ANALYTICS ═══════ -->
@@ -1071,6 +1158,23 @@ tbody td:first-child { color:var(--blue);font-weight:500; }
         </div>
 
       </div><!-- /analytics-layout -->
+    <!-- Section footer -->
+    <div class="section-nav-footer">
+      <div class="section-nav-footer-info">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Step 4 of 4 — Analyze and model your weather data
+      </div>
+      <div class="section-nav-btns">
+        <button class="btn-nav btn-nav-prev" onclick="switchPageTab('export')">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          Back: Export
+        </button>
+        <button class="btn-nav btn-nav-prev" onclick="switchPageTab('fetch')">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          Fetch New Data
+        </button>
+      </div>
+    </div>
     </div><!-- /section-analytics -->
 
   </div><!-- /page-content -->
@@ -1164,6 +1268,28 @@ function enableDataTabs() {
 }
 // alias for legacy call
 function enableAnalyticsTab() { enableDataTabs(); }
+
+function goNextFromFetch() {
+  if (!allResults.length) {
+    // No data yet — highlight the fetch button
+    const btn = document.getElementById('fetchBtn');
+    btn.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.4)';
+    setTimeout(() => btn.style.boxShadow = '', 1500);
+    toast('Fetch data first before proceeding.', 'error');
+    return;
+  }
+  switchPageTab('preview');
+}
+
+function updateFetchFooterBtn() {
+  const btn = document.getElementById('footer-next-fetch');
+  if (!btn) return;
+  if (allResults.length) {
+    btn.classList.remove('locked');
+  } else {
+    btn.classList.add('locked');
+  }
+}
 
 // ── Toast ────────────────────────────────────────────────────────────
 function toast(msg, type='success') {
@@ -1534,6 +1660,7 @@ async function fetchAllData() {
     renderResults();
     document.getElementById('exportBtn').disabled=false;
     enableAnalyticsTab();
+    updateFetchFooterBtn();
     const totalH=allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
     const totalD=allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
     const parts=[];if(totalH)parts.push(totalH.toLocaleString()+' hourly');if(totalD)parts.push(totalD.toLocaleString()+' daily');
@@ -1631,6 +1758,7 @@ function resetForm() {
   renderMetricGrid(); hideAlerts(); clearAllErrors();
   allResults=[]; renderEmptyState();
   document.getElementById('exportBtn').disabled=true;
+  updateFetchFooterBtn();
   document.getElementById('progressWrap').classList.remove('visible');
   document.getElementById('spinner').classList.remove('visible');
   
