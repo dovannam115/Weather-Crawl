@@ -1434,8 +1434,8 @@ function getLocations() {
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 function updateStats() {
-  document.getElementById('stat-locs').textContent = document.querySelectorAll('.loc-card').length;
-  document.getElementById('stat-metrics').textContent = checkedHourly.size + checkedDaily.size;
+  
+  
   updateMetricCounts();
 }
 
@@ -1537,7 +1537,7 @@ async function fetchAllData() {
     const totalH=allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
     const totalD=allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
     const parts=[];if(totalH)parts.push(totalH.toLocaleString()+' hourly');if(totalD)parts.push(totalD.toLocaleString()+' daily');
-    document.getElementById('stat-records').textContent=(totalH+totalD).toLocaleString();
+    
     if(errors.length)showError(`${errors.length} failed: ${errors.join('; ')}`);
     else showSuccess(`${allResults.length} location(s) fetched — ${parts.join(' · ')} records`);
   }else{
@@ -1633,7 +1633,7 @@ function resetForm() {
   document.getElementById('exportBtn').disabled=true;
   document.getElementById('progressWrap').classList.remove('visible');
   document.getElementById('spinner').classList.remove('visible');
-  document.getElementById('stat-records').textContent='—';
+  
   updateStats();
 }
 
@@ -1751,7 +1751,15 @@ function onAnalyticsLocationChange() {
   // Enable/disable dataset radios
   const hasH = !!(r?.data?.hourly?.time?.length);
   const hasD = !!(r?.data?.daily?.time?.length);
-  document.getElementById('an-radio-hourly').classList.toggle('disabled', !hasH);
+  document.getElementById('ds-btn-hourly')?.classList.toggle('disabled-btn', !hasH);
+  document.getElementById('ds-btn-daily')?.classList.toggle('disabled-btn', !hasD);
+  // Update row counts on dataset toggle buttons
+  const hCount = r?.data?.hourly?.time?.length || 0;
+  const dCount = r?.data?.daily?.time?.length || 0;
+  const hEl = document.getElementById('ds-count-hourly');
+  const dEl = document.getElementById('ds-count-daily');
+  if (hEl) hEl.textContent = hCount ? hCount.toLocaleString()+' rows' : 'no data';
+  if (dEl) dEl.textContent = dCount ? dCount.toLocaleString()+' rows' : 'no data';
   if (!hasH && hasD) selectDataset('daily');
   else if (hasH) selectDataset('hourly');
   populateMetricDropdown();
@@ -1759,8 +1767,8 @@ function onAnalyticsLocationChange() {
 
 function selectDataset(ds) {
   anState.dataset = ds;
-  document.getElementById('an-radio-hourly').classList.toggle('selected', ds==='hourly');
-  document.getElementById('an-radio-daily').classList.toggle('selected', ds==='daily');
+  document.getElementById('ds-btn-hourly')?.classList.toggle('active', ds==='hourly');
+  document.getElementById('ds-btn-daily')?.classList.toggle('active', ds==='daily');
   document.getElementById('an-agg-section').style.display = ds==='hourly' ? '' : 'none';
   document.getElementById('an-horizon-hint').textContent = 'Next ' + document.getElementById('an-horizon').value + (ds==='hourly' ? ' hours' : ' days');
   populateMetricDropdown();
