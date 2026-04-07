@@ -3,645 +3,1057 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Weather Archive — Historical Climate Data Explorer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
-// ── Tab switching ─────────────────────────────────────────────────────────────
-function switchTab(tab) {
-  document.querySelectorAll('.input-tab').forEach((btn, i) => {
-    btn.classList.toggle('active', (i===0&&tab==='manual')||(i===1&&tab==='import'));
-  });
-  document.getElementById('tab-manual').classList.toggle('active', tab==='manual');
-  document.getElementById('tab-import').classList.toggle('active', tab==='import');
-}
-
-// ── Download template ─────────────────────────────────────────────────────────
-function downloadTemplate() {
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([
-    ['Location Name', 'Latitude', 'Longitude'],
-    ['Ho Chi Minh City', 10.8, 106.6],
-    ['Ha Noi', 21.03, 105.85],
-    ['Da Nang', 16.05, 108.2],
-  ]);
-  // Column widths
-  ws['!cols'] = [{wch:24},{wch:12},{wch:12}];
-  XLSX.utils.book_append_sheet(wb, ws, 'locations');
-  XLSX.writeFile(wb, 'weather_locations_template.xlsx');
-}
-
-// ── Upload & parse template ───────────────────────────────────────────────────
-function handleUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  // Drag-drop zone feedback
-  setImportStatus('', '');
-
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      const wb = XLSX.read(e.target.result, {type:'array'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-
-      // Find header row (look for "Location Name" or "Latitude")
-      let headerIdx = -1;
-      for (let i=0; i<rows.length; i++) {
-        const r = rows[i].map(c=>String(c).toLowerCase());
-        if (r.some(c=>c.includes('location')) && r.some(c=>c.includes('lat'))) {
-          headerIdx = i; break;
-        }
-      }
-      if (headerIdx === -1) { setImportStatus('err', 'Could not find header row. Make sure the template has "Location Name", "Latitude", "Longitude" columns.'); return; }
-
-      const headers = rows[headerIdx].map(c=>String(c).toLowerCase().trim());
-      const nameIdx = headers.findIndex(h=>h.includes('name')||h.includes('location'));
-      const latIdx  = headers.findIndex(h=>h.includes('lat'));
-      const lonIdx  = headers.findIndex(h=>h.includes('lon'));
-
-      if (latIdx===-1||lonIdx===-1) { setImportStatus('err', 'Missing Latitude or Longitude columns.'); return; }
-
-      const dataRows = rows.slice(headerIdx+1).filter(r=>r[latIdx]!==''&&r[latIdx]!==undefined);
-      if (!dataRows.length) { setImportStatus('err', 'No data rows found below the header.'); return; }
-
-      // Clear existing locations and load new ones
-      document.getElementById('locationsList').innerHTML = '';
-      locCounter = 0;
-      dataRows.forEach(row => {
-        const name = nameIdx>=0 ? String(row[nameIdx]||'').trim() : '';
-        const lat  = String(row[latIdx]).trim();
-        const lon  = String(row[lonIdx]).trim();
-        addLocation({name: name||('Location '+(locCounter+1)), lat, lon});
-      });
-
-      setImportStatus('ok', `Imported ${dataRows.length} location(s) successfully. Switch to Manual Input tab to review or edit.`);
-      // Auto-switch to manual tab after short delay
-      setTimeout(()=>switchTab('manual'), 1200);
-
-    } catch(err) {
-      setImportStatus('err', 'Failed to parse file: ' + err.message);
-    }
-    // Reset input so same file can be re-uploaded
-    input.value = '';
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function setImportStatus(type, msg) {
-  const el = document.getElementById('importStatus');
-  el.className = 'import-status' + (type ? ' '+type : '');
-  el.textContent = msg;
-}
-
-// ── Drag & drop on import zone ────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const zone = document.getElementById('importZone');
-  if (!zone) return;
-  zone.addEventListener('dragover', e=>{ e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', ()=>zone.classList.remove('dragover'));
-  zone.addEventListener('drop', e=>{
-    e.preventDefault(); zone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const fakeInput = {files:[file], value:''};
-    handleUpload(fakeInput);
-  });
-});
-</script>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap" rel="stylesheet">
+<title>Weather Archive — Data Exporter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:#0a0e14;--surface:#111720;--surface2:#1a2233;--border:#1f2d42;
-    --accent:#4af0b0;--accent2:#3a8fff;--accent3:#f0b84a;--accent4:#c084fc;
-    --text:#c8d8f0;--text-dim:#5a7090;--text-bright:#e8f4ff;
-    --danger:#ff5a6e;--success:#4af0b0;
-    --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--radius:4px;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh;overflow-x:hidden}
-  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(74,240,176,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(74,240,176,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
-  .container{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:40px 24px 80px}
-  header{margin-bottom:48px;border-bottom:1px solid var(--border);padding-bottom:32px}
-  .header-tag{font-size:11px;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-  .header-tag::before{content:'';display:inline-block;width:20px;height:1px;background:var(--accent)}
-  h1{font-family:var(--serif);font-size:clamp(28px,5vw,48px);font-weight:300;color:var(--text-bright);line-height:1.1;letter-spacing:-.02em}
-  h1 em{font-style:italic;color:var(--accent)}
-  .header-desc{margin-top:12px;color:var(--text-dim);font-size:12px;line-height:1.6;max-width:520px}
-  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:20px;position:relative;overflow:hidden}
-  .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent2),transparent);opacity:.3}
-  .panel-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent2);margin-bottom:20px;display:flex;align-items:center;gap:8px}
-  .panel-label::after{content:'';flex:1;height:1px;background:var(--border)}
+/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --c-bg:#f0f4f8;
+  --c-surface:#ffffff;
+  --c-surface2:#f8fafc;
+  --c-border:#e2e8f0;
+  --c-border2:#cbd5e1;
+  --c-blue:#2563eb;
+  --c-blue-h:#1d4ed8;
+  --c-blue-s:#dbeafe;
+  --c-blue-t:rgba(37,99,235,0.08);
+  --c-green:#059669;
+  --c-green-s:#d1fae5;
+  --c-red:#dc2626;
+  --c-red-s:#fee2e2;
+  --c-amber:#d97706;
+  --c-amber-s:#fef3c7;
+  --c-slate:#64748b;
+  --c-slate2:#94a3b8;
+  --c-text:#0f172a;
+  --c-text2:#475569;
+  --c-text3:#94a3b8;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.05);
+  --shadow:0 1px 3px rgba(0,0,0,0.07),0 4px 12px rgba(0,0,0,0.05);
+  --shadow-md:0 4px 6px rgba(0,0,0,0.06),0 10px 24px rgba(0,0,0,0.07);
+  --shadow-lg:0 10px 15px rgba(0,0,0,0.06),0 20px 40px rgba(0,0,0,0.08);
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --font:'Outfit',sans-serif;
+  --mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font);
+  background:var(--c-bg);
+  color:var(--c-text);
+  font-size:14px;
+  line-height:1.5;
+  min-height:100vh;
+}
 
-  /* Location cards */
-  #locationsList{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
-  .loc-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;transition:border-color .2s}
-  .loc-card:hover{border-color:var(--text-dim)}
-  .loc-card-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-  .loc-badge{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--bg);border-radius:2px;padding:2px 7px;flex-shrink:0}
-  .loc-name-preview{font-size:12px;color:var(--text-bright);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .loc-remove{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:2px;transition:color .15s,background .15s}
-  .loc-remove:hover{color:var(--danger);background:rgba(255,90,110,.08)}
-  .loc-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}
-  .form-group{display:flex;flex-direction:column;gap:6px}
-  label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim)}
-  input[type=text],input[type=number],input[type=date]{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-bright);font-family:var(--mono);font-size:13px;padding:10px 14px;outline:none;transition:border-color .2s,box-shadow .2s;width:100%;color-scheme:dark}
-  input:focus{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(58,143,255,.12)}
-  .btn-add-loc{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1px dashed var(--border);color:var(--text-dim);border-radius:var(--radius);padding:10px 20px;cursor:pointer;transition:border-color .2s,color .2s;display:inline-flex;align-items:center;gap:8px}
-  .btn-add-loc:hover{border-color:var(--accent2);color:var(--accent2)}
+/* ─── Layout ───────────────────────────────────────────────────────────────── */
+.page-wrap{max-width:1320px;margin:0 auto;padding:0 20px 60px}
 
-  /* Input method tabs */
-  .input-tabs{display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;width:fit-content}
-  .input-tab{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:none;color:var(--text-dim);padding:9px 18px;cursor:pointer;transition:background .2s,color .2s;border-right:1px solid var(--border)}
-  .input-tab:last-child{border-right:none}
-  .input-tab:hover{color:var(--text-bright)}
-  .input-tab.active{background:var(--surface2);color:var(--accent2)}
-  .tab-pane{display:none}.tab-pane.active{display:block}
+/* ─── Header ───────────────────────────────────────────────────────────────── */
+.site-header{
+  background:var(--c-surface);
+  border-bottom:1px solid var(--c-border);
+  position:sticky;top:0;z-index:100;
+  box-shadow:var(--shadow-sm);
+}
+.header-inner{
+  max-width:1320px;margin:0 auto;padding:0 20px;
+  height:60px;display:flex;align-items:center;gap:14px;
+}
+.header-icon{
+  width:36px;height:36px;border-radius:9px;
+  background:linear-gradient(135deg,#2563eb,#1e40af);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+  box-shadow:0 2px 8px rgba(37,99,235,0.3);
+}
+.header-icon svg{width:18px;height:18px;color:#fff;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.header-text h1{font-size:16px;font-weight:600;color:var(--c-text);letter-spacing:-0.01em}
+.header-text p{font-size:12px;color:var(--c-text3);margin-top:1px}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.badge{font-size:11px;font-weight:500;padding:3px 9px;border-radius:20px;background:var(--c-blue-s);color:var(--c-blue);letter-spacing:0.02em}
 
-  /* Import zone */
-  .import-zone{border:1px dashed var(--border);border-radius:var(--radius);padding:24px;text-align:center;transition:border-color .2s,background .2s}
-  .import-zone.dragover{border-color:var(--accent2);background:rgba(58,143,255,.05)}
-  .import-zone-icon{font-size:28px;margin-bottom:10px;opacity:.5}
-  .import-zone-text{font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.6}
-  .import-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center}
-  .btn-template{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:var(--radius);padding:9px 16px;cursor:pointer;transition:background .2s,box-shadow .2s;display:inline-flex;align-items:center;gap:7px}
-  .btn-template:hover{background:rgba(74,240,176,.08);box-shadow:0 0 12px rgba(74,240,176,.15)}
-  .btn-upload-label{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:1px solid var(--accent2);color:var(--accent2);border-radius:var(--radius);padding:9px 16px;cursor:pointer;transition:background .2s;display:inline-flex;align-items:center;gap:7px}
-  .btn-upload-label:hover{background:rgba(58,143,255,.08)}
-  #uploadInput{display:none}
-  .import-status{margin-top:14px;font-size:11px;padding:8px 12px;border-radius:var(--radius);display:none}
-  .import-status.ok{display:block;background:rgba(74,240,176,.08);border:1px solid rgba(74,240,176,.2);color:var(--success)}
-  .import-status.err{display:block;background:rgba(255,90,110,.08);border:1px solid rgba(255,90,110,.2);color:var(--danger)}
+/* ─── Page hero strip ──────────────────────────────────────────────────────── */
+.page-hero{
+  background:linear-gradient(135deg,#1e3a5f 0%,#1e40af 50%,#1d4ed8 100%);
+  padding:32px 20px 28px;margin-bottom:28px;
+  position:relative;overflow:hidden;
+}
+.page-hero::before{
+  content:'';position:absolute;inset:0;
+  background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+.page-hero-inner{max-width:1320px;margin:0 auto;position:relative}
+.page-hero h2{font-size:26px;font-weight:600;color:#fff;letter-spacing:-0.02em;margin-bottom:6px}
+.page-hero p{font-size:14px;color:rgba(255,255,255,0.7);max-width:520px}
+.hero-stats{display:flex;gap:24px;margin-top:20px;flex-wrap:wrap}
+.hero-stat{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 16px;backdrop-filter:blur(4px)}
+.hero-stat-val{font-size:18px;font-weight:600;color:#fff;line-height:1}
+.hero-stat-lbl{font-size:11px;color:rgba(255,255,255,0.6);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em}
 
-  /* Date range */
-  .date-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+/* ─── Two-column grid ──────────────────────────────────────────────────────── */
+.main-grid{display:grid;grid-template-columns:380px 1fr;gap:20px;margin-bottom:20px}
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
 
-  /* Type toggles */
-  .type-row{display:flex;gap:12px;flex-wrap:wrap}
-  .type-toggle{display:flex;align-items:center;gap:10px;cursor:pointer;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 18px;transition:border-color .2s,background .2s;user-select:none}
-  .type-toggle:hover{border-color:var(--text-dim)}
-  .type-toggle input[type=checkbox]{display:none}
-  .type-toggle.active{border-color:var(--accent);background:rgba(74,240,176,.06);color:var(--accent)}
-  .type-indicator{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;transition:background .2s}
-  .type-toggle.active .type-indicator{background:var(--accent)}
+/* ─── Card ─────────────────────────────────────────────────────────────────── */
+.card{
+  background:var(--c-surface);
+  border:1px solid var(--c-border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow);
+}
+.card-header{
+  padding:18px 20px 16px;
+  border-bottom:1px solid var(--c-border);
+  display:flex;align-items:center;gap:10px;
+}
+.card-header-icon{
+  width:32px;height:32px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.card-header-icon.blue{background:var(--c-blue-s)}
+.card-header-icon.green{background:var(--c-green-s)}
+.card-header-icon.amber{background:var(--c-amber-s)}
+.card-header-icon svg{width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.card-header-icon.blue svg{stroke:var(--c-blue)}
+.card-header-icon.green svg{stroke:var(--c-green)}
+.card-header-icon.amber svg{stroke:var(--c-amber)}
+.card-title{font-size:14px;font-weight:600;color:var(--c-text)}
+.card-subtitle{font-size:12px;color:var(--c-text3);margin-top:1px}
+.card-body{padding:20px}
 
-  /* Metrics */
-  .metrics-sections{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-  .metrics-group{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
-  .metrics-group.disabled{opacity:.3;pointer-events:none}
-  .metrics-group-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3);flex-shrink:0}
-  .dot.blue{background:var(--accent2)}
-  .metric-item{display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;transition:color .15s}
-  .metric-item:hover{color:var(--text-bright)}
-  .metric-item input[type=checkbox]{display:none}
-  .check-box{width:14px;height:14px;border:1px solid var(--border);border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
-  .metric-item.checked .check-box{border-color:var(--accent);background:var(--accent)}
-  .check-box::after{content:'✓';font-size:9px;color:var(--bg);opacity:0;transition:opacity .15s}
-  .metric-item.checked .check-box::after{opacity:1}
-  .metric-name{font-size:12px;color:var(--text-dim);transition:color .15s}
-  .metric-item.checked .metric-name{color:var(--text-bright)}
-  .select-all-row{display:flex;align-items:center;gap:8px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--border);cursor:pointer;color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
-  .select-all-row:hover{color:var(--text-bright)}
+/* ─── Form elements ────────────────────────────────────────────────────────── */
+.field{margin-bottom:14px}
+.field:last-child{margin-bottom:0}
+.field-label{
+  display:block;font-size:12px;font-weight:500;
+  color:var(--c-text2);margin-bottom:5px;
+  letter-spacing:0.02em;
+}
+.field-label span{color:var(--c-red);margin-left:2px}
+.input-wrap{position:relative}
+.input-wrap .icon{
+  position:absolute;left:11px;top:50%;transform:translateY(-50%);
+  pointer-events:none;opacity:0.4;
+}
+.input-wrap .icon svg{width:15px;height:15px;fill:none;stroke:var(--c-text);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.input{
+  width:100%;padding:9px 12px;
+  border:1.5px solid var(--c-border);
+  border-radius:var(--radius-sm);
+  font-family:var(--font);font-size:13.5px;
+  color:var(--c-text);background:var(--c-surface);
+  transition:border-color .15s,box-shadow .15s;
+  outline:none;
+  color-scheme:light;
+}
+.input-wrap .input{padding-left:34px}
+.input:focus{border-color:var(--c-blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1)}
+.input.error{border-color:var(--c-red);box-shadow:0 0 0 3px rgba(220,38,38,0.1)}
+.input-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-error{font-size:11px;color:var(--c-red);margin-top:4px;display:none}
+.field-error.visible{display:block}
 
-  /* Actions */
-  .actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  .btn{font-family:var(--mono);font-size:12px;letter-spacing:.08em;border:none;border-radius:var(--radius);cursor:pointer;padding:12px 24px;transition:all .2s;display:inline-flex;align-items:center;gap:8px;text-transform:uppercase}
-  .btn-primary{background:var(--accent);color:var(--bg);font-weight:500}
-  .btn-primary:hover{background:#6af8c0;box-shadow:0 0 20px rgba(74,240,176,.25)}
-  .btn-primary:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
-  .btn-export{background:transparent;border:1px solid var(--accent3);color:var(--accent3)}
-  .btn-export:hover{background:rgba(240,184,74,.08);box-shadow:0 0 16px rgba(240,184,74,.15)}
-  .btn-export:disabled{opacity:.3;cursor:not-allowed}
-  .spinner{display:none;align-items:center;gap:10px;color:var(--text-dim);font-size:12px}
-  .spinner.visible{display:flex}
-  .spin-ring{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .msg{padding:12px 16px;border-radius:var(--radius);font-size:12px;margin-top:16px;display:none}
-  .msg.visible{display:block}
-  .msg-error{background:rgba(255,90,110,.08);border:1px solid rgba(255,90,110,.3);color:var(--danger)}
-  .msg-success{background:rgba(74,240,176,.08);border:1px solid rgba(74,240,176,.3);color:var(--success)}
+/* ─── Input method tabs (location) ────────────────────────────────────────── */
+.method-tabs{display:flex;background:var(--c-bg);border-radius:var(--radius-sm);padding:3px;margin-bottom:16px;gap:2px}
+.method-tab{
+  flex:1;font-family:var(--font);font-size:12px;font-weight:500;
+  border:none;background:transparent;color:var(--c-text3);
+  padding:7px 10px;border-radius:6px;cursor:pointer;
+  transition:background .15s,color .15s;text-align:center;
+}
+.method-tab.active{background:var(--c-surface);color:var(--c-blue);box-shadow:var(--shadow-sm)}
+.tab-pane{display:none}.tab-pane.active{display:block}
 
-  /* Progress */
-  .progress-bar-wrap{margin-top:14px;display:none}
-  .progress-bar-wrap.visible{display:block}
-  .progress-label{font-size:11px;color:var(--text-dim);margin-bottom:6px}
-  .progress-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
-  .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s;width:0%}
+/* ─── Location cards ───────────────────────────────────────────────────────── */
+.loc-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.loc-card{
+  border:1.5px solid var(--c-border);
+  border-radius:var(--radius);
+  padding:14px;
+  background:var(--c-surface2);
+  position:relative;
+  transition:border-color .15s;
+}
+.loc-card:hover{border-color:var(--c-border2)}
+.loc-card-top{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.loc-num{
+  width:22px;height:22px;border-radius:50%;
+  font-size:11px;font-weight:600;color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.loc-name-preview{font-size:13px;font-weight:500;color:var(--c-text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.loc-del{
+  width:26px;height:26px;border:none;background:transparent;
+  color:var(--c-text3);border-radius:6px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s;flex-shrink:0;
+}
+.loc-del:hover{background:var(--c-red-s);color:var(--c-red)}
+.loc-del svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.loc-fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.loc-fields .field{margin-bottom:0}
+.loc-fields .field:first-child{grid-column:1/-1}
+.btn-add-loc{
+  width:100%;padding:9px;border:1.5px dashed var(--c-border2);
+  border-radius:var(--radius-sm);background:transparent;
+  color:var(--c-text3);font-family:var(--font);font-size:13px;
+  cursor:pointer;transition:border-color .15s,color .15s,background .15s;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.btn-add-loc:hover{border-color:var(--c-blue);color:var(--c-blue);background:var(--c-blue-t)}
 
-  /* Results */
-  #results{margin-top:32px}
-  .results-location-block{margin-bottom:40px}
-  .results-loc-header{display:flex;align-items:baseline;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--border)}
-  .results-loc-name{font-family:var(--serif);font-size:22px;font-weight:300}
-  .results-loc-coords{font-size:11px;color:var(--text-dim)}
-  .results-section{margin-bottom:24px}
-  .results-header{display:flex;align-items:baseline;gap:16px;margin-bottom:12px}
-  .results-title{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2)}
-  .results-count{font-size:11px;color:var(--text-dim)}
-  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  thead th{background:var(--surface2);color:var(--text-dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:10px 14px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);position:sticky;top:0}
-  tbody tr{border-bottom:1px solid rgba(31,45,66,.5);transition:background .1s}
-  tbody tr:hover{background:var(--surface2)}
-  tbody tr:last-child{border-bottom:none}
-  tbody td{padding:8px 14px;color:var(--text);white-space:nowrap}
-  tbody td:first-child{color:var(--accent2);font-size:11px}
-  .table-note{padding:10px 14px;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border)}
+/* ─── Import zone ──────────────────────────────────────────────────────────── */
+.import-zone{
+  border:2px dashed var(--c-border2);border-radius:var(--radius);
+  padding:28px 20px;text-align:center;
+  transition:border-color .2s,background .2s;
+  background:var(--c-surface2);
+}
+.import-zone.dragover{border-color:var(--c-blue);background:var(--c-blue-t)}
+.import-zone-icon{font-size:32px;margin-bottom:10px;opacity:0.5}
+.import-zone p{font-size:13px;color:var(--c-text3);margin-bottom:16px;line-height:1.6}
+.import-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+#uploadInput{display:none}
+.import-feedback{
+  margin-top:12px;font-size:12px;padding:8px 12px;
+  border-radius:var(--radius-sm);display:none;
+  text-align:left;
+}
+.import-feedback.ok{display:block;background:var(--c-green-s);color:var(--c-green);border:1px solid #a7f3d0}
+.import-feedback.err{display:block;background:var(--c-red-s);color:var(--c-red);border:1px solid #fecaca}
 
-  @media(max-width:640px){.loc-grid{grid-template-columns:1fr}.metrics-sections{grid-template-columns:1fr}.date-grid{grid-template-columns:1fr}}
+/* ─── Metric panel tabs ────────────────────────────────────────────────────── */
+.metric-tabs{display:flex;border-bottom:1px solid var(--c-border);padding:0 20px;gap:0}
+.metric-tab{
+  font-family:var(--font);font-size:13px;font-weight:500;
+  border:none;background:transparent;color:var(--c-text3);
+  padding:12px 16px;cursor:pointer;position:relative;
+  border-bottom:2px solid transparent;margin-bottom:-1px;
+  transition:color .15s;
+}
+.metric-tab.active{color:var(--c-blue);border-bottom-color:var(--c-blue)}
+.metric-tab .cnt{
+  font-size:11px;font-weight:600;
+  background:var(--c-blue-s);color:var(--c-blue);
+  border-radius:10px;padding:1px 6px;margin-left:6px;
+}
+.metric-tab:not(.active) .cnt{background:var(--c-bg);color:var(--c-text3)}
+
+/* ─── Metric search & controls ─────────────────────────────────────────────── */
+.metric-controls{padding:14px 20px;border-bottom:1px solid var(--c-border);display:flex;gap:8px;align-items:center}
+.metric-search{
+  flex:1;padding:7px 10px 7px 32px;
+  border:1.5px solid var(--c-border);border-radius:var(--radius-sm);
+  font-family:var(--font);font-size:13px;color:var(--c-text);
+  background:var(--c-bg);outline:none;transition:border-color .15s,box-shadow .15s;
+}
+.metric-search:focus{border-color:var(--c-blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1);background:var(--c-surface)}
+.metric-search-wrap{position:relative;flex:1}
+.metric-search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;fill:none;stroke:var(--c-text3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.btn-sm{
+  font-family:var(--font);font-size:12px;font-weight:500;
+  border:1.5px solid var(--c-border);background:transparent;
+  color:var(--c-text2);border-radius:var(--radius-sm);
+  padding:6px 11px;cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s;white-space:nowrap;
+}
+.btn-sm:hover{border-color:var(--c-blue);color:var(--c-blue);background:var(--c-blue-t)}
+
+/* ─── Metric grid ──────────────────────────────────────────────────────────── */
+.metric-grid{
+  padding:14px 20px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+  gap:6px;max-height:320px;overflow-y:auto;
+}
+.metric-item{
+  display:flex;align-items:center;gap:9px;
+  padding:8px 10px;border-radius:var(--radius-sm);
+  cursor:pointer;transition:background .12s;
+  border:1.5px solid transparent;
+}
+.metric-item:hover{background:var(--c-bg)}
+.metric-item.checked{background:var(--c-blue-t);border-color:rgba(37,99,235,0.2)}
+.metric-cb{
+  width:16px;height:16px;border-radius:4px;
+  border:1.5px solid var(--c-border2);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  transition:border-color .12s,background .12s;
+  background:var(--c-surface);
+}
+.metric-item.checked .metric-cb{border-color:var(--c-blue);background:var(--c-blue)}
+.metric-cb svg{width:9px;height:9px;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;fill:none;opacity:0;transition:opacity .1s}
+.metric-item.checked .metric-cb svg{opacity:1}
+.metric-item input[type=checkbox]{display:none}
+.metric-label{font-size:12.5px;color:var(--c-text2);line-height:1.3}
+.metric-item.checked .metric-label{color:var(--c-text);font-weight:500}
+.metric-unit{font-size:11px;color:var(--c-text3);display:block;font-family:var(--mono)}
+.metric-footer{
+  padding:10px 20px;border-top:1px solid var(--c-border);
+  font-size:12px;color:var(--c-text3);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.metric-footer strong{color:var(--c-blue)}
+.metric-empty{padding:30px 20px;text-align:center;color:var(--c-text3);font-size:13px}
+
+/* ─── Action bar ───────────────────────────────────────────────────────────── */
+.action-bar{
+  background:var(--c-surface);border:1px solid var(--c-border);
+  border-radius:var(--radius-lg);padding:16px 20px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  box-shadow:var(--shadow);margin-bottom:20px;
+}
+.action-bar-left{display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap}
+.action-bar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
+
+/* ─── Buttons ──────────────────────────────────────────────────────────────── */
+.btn{
+  font-family:var(--font);font-size:13.5px;font-weight:500;
+  border:none;border-radius:var(--radius-sm);cursor:pointer;
+  padding:10px 20px;transition:all .15s;
+  display:inline-flex;align-items:center;gap:7px;
+  white-space:nowrap;
+}
+.btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn-primary{background:var(--c-blue);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,0.3)}
+.btn-primary:hover{background:var(--c-blue-h);box-shadow:0 4px 12px rgba(37,99,235,0.35);transform:translateY(-1px)}
+.btn-primary:active{transform:translateY(0)}
+.btn-primary:disabled{opacity:0.45;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-success{background:var(--c-green);color:#fff;box-shadow:0 1px 3px rgba(5,150,105,0.3)}
+.btn-success:hover{background:#047857;box-shadow:0 4px 12px rgba(5,150,105,0.35);transform:translateY(-1px)}
+.btn-success:disabled{opacity:0.35;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-ghost{background:transparent;color:var(--c-text2);border:1.5px solid var(--c-border)}
+.btn-ghost:hover{border-color:var(--c-border2);background:var(--c-bg);color:var(--c-text)}
+.btn-outline-blue{background:transparent;color:var(--c-blue);border:1.5px solid currentColor}
+.btn-outline-blue:hover{background:var(--c-blue-t)}
+
+/* ─── Progress bar ─────────────────────────────────────────────────────────── */
+.progress-wrap{flex:1;min-width:180px;display:none}
+.progress-wrap.visible{display:block}
+.progress-label{font-size:12px;color:var(--c-text2);margin-bottom:5px;display:flex;justify-content:space-between}
+.progress-track{height:5px;background:var(--c-border);border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--c-blue),#60a5fa);border-radius:3px;transition:width .3s;width:0%}
+
+/* ─── Spinner ──────────────────────────────────────────────────────────────── */
+.spinner-wrap{display:none;align-items:center;gap:8px;font-size:13px;color:var(--c-text2)}
+.spinner-wrap.visible{display:flex}
+.spin{width:18px;height:18px;border:2px solid var(--c-border2);border-top-color:var(--c-blue);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ─── Alert messages ───────────────────────────────────────────────────────── */
+.alert{
+  border-radius:var(--radius);padding:13px 16px;
+  font-size:13px;display:none;
+  align-items:flex-start;gap:10px;margin-bottom:16px;
+}
+.alert.visible{display:flex}
+.alert svg{width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px}
+.alert-error{background:var(--c-red-s);border:1px solid #fecaca;color:#991b1b}
+.alert-error svg{stroke:#dc2626}
+.alert-success{background:var(--c-green-s);border:1px solid #a7f3d0;color:#065f46}
+.alert-success svg{stroke:#059669}
+.alert-body{flex:1;line-height:1.5}
+
+/* ─── Results section ──────────────────────────────────────────────────────── */
+.results-section{margin-bottom:20px}
+.results-header-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.results-location-label{
+  font-size:15px;font-weight:600;color:var(--c-text);
+  display:flex;align-items:center;gap:8px;
+}
+.results-location-label .loc-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.results-coords{font-size:12px;color:var(--c-text3);font-family:var(--mono)}
+
+/* Result sub-tabs */
+.result-tabs{display:flex;background:var(--c-bg);border-radius:var(--radius-sm);padding:3px;gap:2px;width:fit-content;margin-bottom:14px}
+.result-tab{
+  font-family:var(--font);font-size:12.5px;font-weight:500;
+  border:none;background:transparent;color:var(--c-text3);
+  padding:6px 14px;border-radius:6px;cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.result-tab.active{background:var(--c-surface);color:var(--c-blue);box-shadow:var(--shadow-sm)}
+
+/* Table */
+.table-card{
+  background:var(--c-surface);border:1px solid var(--c-border);
+  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);
+}
+.table-wrap{overflow-x:auto;max-height:360px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead{position:sticky;top:0;z-index:2}
+thead th{
+  background:var(--c-surface2);color:var(--c-text2);
+  font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;
+  padding:10px 14px;text-align:left;white-space:nowrap;
+  border-bottom:1px solid var(--c-border);
+}
+tbody tr{border-bottom:1px solid rgba(226,232,240,0.6);transition:background .1s}
+tbody tr:hover{background:#f8fafc}
+tbody tr:last-child{border-bottom:none}
+tbody td{padding:9px 14px;color:var(--c-text2);white-space:nowrap;font-family:var(--mono);font-size:12px}
+tbody td:first-child{color:var(--c-blue);font-weight:500}
+.table-footer{
+  padding:10px 16px;border-top:1px solid var(--c-border);
+  font-size:12px;color:var(--c-text3);
+  background:var(--c-surface2);
+  display:flex;align-items:center;justify-content:space-between;
+}
+
+/* ─── Empty state ──────────────────────────────────────────────────────────── */
+.empty-state{
+  background:var(--c-surface);border:1px solid var(--c-border);
+  border-radius:var(--radius-lg);padding:60px 20px;
+  text-align:center;box-shadow:var(--shadow);
+}
+.empty-icon{font-size:44px;margin-bottom:14px;opacity:0.4}
+.empty-title{font-size:16px;font-weight:600;color:var(--c-text);margin-bottom:6px}
+.empty-desc{font-size:13px;color:var(--c-text3);max-width:340px;margin:0 auto;line-height:1.6}
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--c-border2);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--c-slate2)}
+
+/* ─── Responsive ───────────────────────────────────────────────────────────── */
+@media(max-width:600px){
+  .page-hero h2{font-size:20px}
+  .action-bar{flex-direction:column;align-items:stretch}
+  .action-bar-right{margin-left:0}
+  .hero-stats{gap:10px}
+  .loc-fields{grid-template-columns:1fr 1fr}
+  .loc-fields .field:first-child{grid-column:1/-1}
+}
+
+/* ─── Utility ──────────────────────────────────────────────────────────────── */
+.mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 </style>
 </head>
 <body>
-<div class="container">
 
-  <header>
-    <div class="header-tag">Open-Meteo Archive API</div>
-    <h1>Historical <em>Weather</em><br>Data Explorer</h1>
-    <p class="header-desc">Fetch archived climate data for multiple locations simultaneously. Each location exports as a dedicated sheet in the Excel file.</p>
-  </header>
-
-  <!-- 01 Locations -->
-  <div class="panel">
-    <div class="panel-label">01 — Locations</div>
-
-    <!-- Method tabs -->
-    <div class="input-tabs">
-      <button class="input-tab active" onclick="switchTab('manual')">✎ Manual Input</button>
-      <button class="input-tab" onclick="switchTab('import')">↑ Import from Excel</button>
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-icon">
+      <svg viewBox="0 0 24 24"><path d="M3 15a4 4 0 004 4h9a5 5 0 10-4.9-6H7a4 4 0 00-4 4z"/><path d="M12 3v2M12 12v-2M4.22 6.22l1.42 1.42M18.36 7.64l1.41-1.41M2 12h2M20 12h2"/></svg>
     </div>
-
-    <!-- Tab: Manual -->
-    <div class="tab-pane active" id="tab-manual">
-      <div id="locationsList"></div>
-      <button class="btn-add-loc" onclick="addLocation()">＋ Add Another Location</button>
+    <div class="header-text">
+      <h1>Weather Archive</h1>
+      <p>Historical Climate Data Exporter</p>
     </div>
-
-    <!-- Tab: Import -->
-    <div class="tab-pane" id="tab-import">
-      <div class="import-zone" id="importZone">
-        <div class="import-zone-icon">⬇</div>
-        <div class="import-zone-text">
-          Download the template, fill in your locations in Excel,<br>then upload the file here. Drag &amp; drop also supported.
-        </div>
-        <div class="import-actions">
-          <button class="btn-template" onclick="downloadTemplate()">↓ Download Template (.xlsx)</button>
-          <label class="btn-upload-label" for="uploadInput">↑ Upload Filled Template</label>
-          <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="handleUpload(this)">
-        </div>
-        <div class="import-status" id="importStatus"></div>
-      </div>
+    <div class="header-right">
+      <span class="badge">Open-Meteo API</span>
     </div>
   </div>
+</header>
 
-  <!-- 02 Date Range -->
-  <div class="panel">
-    <div class="panel-label">02 — Date Range <span style="font-size:10px;color:var(--text-dim);text-transform:none;letter-spacing:0">(shared across all locations)</span></div>
-    <div class="date-grid">
-      <div class="form-group"><label>Start Date</label><input type="date" id="startDate"/></div>
-      <div class="form-group"><label>End Date</label><input type="date" id="endDate"/></div>
+<!-- ── Hero strip ─────────────────────────────────────────────────────────── -->
+<div class="page-hero">
+  <div class="page-hero-inner">
+    <h2>Fetch Historical Weather Data</h2>
+    <p>Query archival climate records for multiple locations and export structured data directly to Excel — no API key required.</p>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="hero-stat-val" id="stat-locs">0</div><div class="hero-stat-lbl">Locations</div></div>
+      <div class="hero-stat"><div class="hero-stat-val" id="stat-metrics">3</div><div class="hero-stat-lbl">Metrics Selected</div></div>
+      <div class="hero-stat"><div class="hero-stat-val" id="stat-records">—</div><div class="hero-stat-lbl">Records Fetched</div></div>
     </div>
   </div>
-
-  <!-- 03 Data Type -->
-  <div class="panel">
-    <div class="panel-label">03 — Data Type</div>
-    <div class="type-row">
-      <label class="type-toggle active" id="toggleHourly">
-        <input type="checkbox" id="chkHourly" checked>
-        <div class="type-indicator"></div><span>Hourly Data</span>
-      </label>
-      <label class="type-toggle" id="toggleDaily">
-        <input type="checkbox" id="chkDaily">
-        <div class="type-indicator"></div><span>Daily Data</span>
-      </label>
-    </div>
-  </div>
-
-  <!-- 04 Metrics -->
-  <div class="panel">
-    <div class="panel-label">04 — Metrics Selection</div>
-    <div class="metrics-sections">
-      <div class="metrics-group" id="hourlyGroup">
-        <div class="metrics-group-title"><span class="dot"></span> Hourly Metrics</div>
-        <div class="select-all-row" onclick="selectAll('hourly')"><div class="check-box" id="allHourlyBox"></div> Select All</div>
-        <div id="hourlyMetrics"></div>
-      </div>
-      <div class="metrics-group disabled" id="dailyGroup">
-        <div class="metrics-group-title"><span class="dot blue"></span> Daily Metrics</div>
-        <div class="select-all-row" onclick="selectAll('daily')"><div class="check-box" id="allDailyBox"></div> Select All</div>
-        <div id="dailyMetrics"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 05 Actions -->
-  <div class="panel">
-    <div class="panel-label">05 — Fetch &amp; Export</div>
-    <div class="actions">
-      <button class="btn btn-primary" id="fetchBtn" onclick="fetchAllData()">⟶ Fetch All Locations</button>
-      <button class="btn btn-export" id="exportBtn" onclick="exportExcel()" disabled>↓ Export to Excel</button>
-      <div class="spinner" id="spinner"><div class="spin-ring"></div><span id="spinnerText">Fetching…</span></div>
-    </div>
-    <div class="progress-bar-wrap" id="progressWrap">
-      <div class="progress-label" id="progressLabel"></div>
-      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-    </div>
-    <div class="msg msg-error" id="errMsg"></div>
-    <div class="msg msg-success" id="successMsg"></div>
-  </div>
-
-  <div id="results"></div>
 </div>
 
+<div class="page-wrap">
+
+  <!-- ── Alert messages ──────────────────────────────────────────────────── -->
+  <div class="alert alert-error" id="alertError">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div class="alert-body" id="alertErrorText"></div>
+  </div>
+  <div class="alert alert-success" id="alertSuccess">
+    <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    <div class="alert-body" id="alertSuccessText"></div>
+  </div>
+
+  <!-- ── Main grid ───────────────────────────────────────────────────────── -->
+  <div class="main-grid">
+
+    <!-- Left: Config -->
+    <div style="display:flex;flex-direction:column;gap:20px">
+
+      <!-- Location card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-icon blue">
+            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <div>
+            <div class="card-title">Locations</div>
+            <div class="card-subtitle">Add one or more locations to query</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <!-- Method tabs -->
+          <div class="method-tabs">
+            <button class="method-tab active" onclick="switchTab('manual')">✎ Manual Entry</button>
+            <button class="method-tab" onclick="switchTab('import')">↑ Import Excel</button>
+          </div>
+
+          <!-- Manual tab -->
+          <div class="tab-pane active" id="tab-manual">
+            <div class="loc-list" id="locationsList"></div>
+            <button class="btn-add-loc" onclick="addLocation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Another Location
+            </button>
+          </div>
+
+          <!-- Import tab -->
+          <div class="tab-pane" id="tab-import">
+            <div class="import-zone" id="importZone">
+              <div class="import-zone-icon">📂</div>
+              <p>Download the template, fill in location names and coordinates, then upload it here.<br>Drag &amp; drop supported.</p>
+              <div class="import-actions">
+                <button class="btn btn-outline-blue" onclick="downloadTemplate()">
+                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Download Template
+                </button>
+                <label class="btn btn-ghost" for="uploadInput" style="cursor:pointer">
+                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Upload Template
+                </label>
+                <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="handleUpload(this)">
+              </div>
+              <div class="import-feedback" id="importFeedback"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Date range card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-icon amber">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div>
+            <div class="card-title">Date Range</div>
+            <div class="card-subtitle">Applied to all locations</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="input-row">
+            <div class="field">
+              <label class="field-label">Start Date <span>*</span></label>
+              <div class="input-wrap">
+                <div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                <input type="date" class="input" id="startDate">
+              </div>
+              <div class="field-error" id="err-startDate"></div>
+            </div>
+            <div class="field">
+              <label class="field-label">End Date <span>*</span></label>
+              <div class="input-wrap">
+                <div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                <input type="date" class="input" id="endDate">
+              </div>
+              <div class="field-error" id="err-endDate"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data type card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-icon green">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+          <div>
+            <div class="card-title">Data Resolution</div>
+            <div class="card-subtitle">Select one or both</div>
+          </div>
+        </div>
+        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap">
+          <label class="type-toggle-card" id="toggleHourly" style="flex:1">
+            <input type="checkbox" id="chkHourly" checked style="display:none">
+            <div class="ttc-inner active" id="ttcHourly">
+              <div class="ttc-icon">⏱</div>
+              <div class="ttc-label">Hourly</div>
+              <div class="ttc-desc">24 data points/day</div>
+              <div class="ttc-check" id="ttcCheckH">✓</div>
+            </div>
+          </label>
+          <label class="type-toggle-card" id="toggleDaily" style="flex:1">
+            <input type="checkbox" id="chkDaily" style="display:none">
+            <div class="ttc-inner" id="ttcDaily">
+              <div class="ttc-icon">📅</div>
+              <div class="ttc-label">Daily</div>
+              <div class="ttc-desc">1 data point/day</div>
+              <div class="ttc-check" id="ttcCheckD" style="opacity:0">✓</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- Right: Metric selection -->
+    <div class="card" style="display:flex;flex-direction:column">
+      <div class="card-header">
+        <div class="card-header-icon blue">
+          <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div>
+          <div class="card-title">Metric Selection</div>
+          <div class="card-subtitle">Choose variables to fetch</div>
+        </div>
+      </div>
+
+      <!-- Metric tabs -->
+      <div class="metric-tabs">
+        <button class="metric-tab active" id="mtab-hourly" onclick="switchMetricTab('hourly')">
+          Hourly <span class="cnt" id="cnt-hourly">3</span>
+        </button>
+        <button class="metric-tab" id="mtab-daily" onclick="switchMetricTab('daily')">
+          Daily <span class="cnt" id="cnt-daily">0</span>
+        </button>
+      </div>
+
+      <!-- Search & controls -->
+      <div class="metric-controls">
+        <div class="metric-search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" class="metric-search" id="metricSearch" placeholder="Search metrics…" oninput="filterMetrics()">
+        </div>
+        <button class="btn-sm" onclick="selectAllMetrics(true)">Select All</button>
+        <button class="btn-sm" onclick="selectAllMetrics(false)">Clear</button>
+      </div>
+
+      <!-- Metric grid -->
+      <div class="metric-grid" id="metricGrid"></div>
+
+      <!-- Footer -->
+      <div class="metric-footer">
+        <span>Selected: <strong id="totalSelected">3</strong> metrics</span>
+        <span id="metricTabHint" style="color:var(--c-text3);font-size:11px">Switch tab for daily metrics</span>
+      </div>
+    </div>
+
+  </div><!-- /main-grid -->
+
+  <!-- ── Action bar ────────────────────────────────────────────────────────── -->
+  <div class="action-bar">
+    <div class="action-bar-left">
+      <button class="btn btn-primary" id="fetchBtn" onclick="fetchAllData()">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+        Fetch Weather Data
+      </button>
+      <button class="btn btn-success" id="exportBtn" onclick="exportExcel()" disabled>
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export to Excel
+      </button>
+      <button class="btn btn-ghost" onclick="resetForm()">
+        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+        Reset
+      </button>
+    </div>
+    <div class="action-bar-right">
+      <div class="spinner-wrap" id="spinner">
+        <div class="spin"></div>
+        <span id="spinnerText">Fetching…</span>
+      </div>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-label">
+          <span id="progressLabel">Fetching locations…</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Results ───────────────────────────────────────────────────────────── -->
+  <div id="results">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">🌤</div>
+      <div class="empty-title">No Data Yet</div>
+      <div class="empty-desc">Configure your locations, date range, and metrics above, then click <strong>Fetch Weather Data</strong> to load results.</div>
+    </div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<!-- Toggle card style -->
+<style>
+.type-toggle-card{cursor:pointer;display:block}
+.ttc-inner{
+  border:1.5px solid var(--c-border);border-radius:var(--radius);
+  padding:14px;text-align:center;transition:all .15s;
+  background:var(--c-surface2);position:relative;
+}
+.ttc-inner:hover{border-color:var(--c-border2)}
+.ttc-inner.active{border-color:var(--c-blue);background:var(--c-blue-t)}
+.ttc-icon{font-size:22px;margin-bottom:5px}
+.ttc-label{font-size:14px;font-weight:600;color:var(--c-text)}
+.ttc-desc{font-size:11px;color:var(--c-text3);margin-top:2px}
+.ttc-check{position:absolute;top:8px;right:10px;font-size:13px;color:var(--c-blue);font-weight:700}
+</style>
+
 <script>
+// ─── Constants ────────────────────────────────────────────────────────────────
 const HOURLY_METRICS = [
-  {id:'temperature_2m',      label:'Temperature 2m (°C)'},
-  {id:'relative_humidity_2m',label:'Relative Humidity 2m (%)'},
-  {id:'precipitation',       label:'Precipitation (mm)'},
-  {id:'rain',                label:'Rain (mm)'},
-  {id:'snowfall',            label:'Snowfall (cm)'},
-  {id:'windspeed_10m',       label:'Wind Speed 10m (km/h)'},
-  {id:'winddirection_10m',   label:'Wind Direction 10m (°)'},
-  {id:'cloudcover',          label:'Cloud Cover (%)'},
-  {id:'surface_pressure',    label:'Surface Pressure (hPa)'},
+  {id:'temperature_2m',       label:'Temperature 2m',     unit:'°C'},
+  {id:'relative_humidity_2m', label:'Relative Humidity',  unit:'%'},
+  {id:'precipitation',        label:'Precipitation',      unit:'mm'},
+  {id:'rain',                 label:'Rain',               unit:'mm'},
+  {id:'snowfall',             label:'Snowfall',           unit:'cm'},
+  {id:'windspeed_10m',        label:'Wind Speed 10m',     unit:'km/h'},
+  {id:'winddirection_10m',    label:'Wind Direction 10m', unit:'°'},
+  {id:'cloudcover',           label:'Cloud Cover',        unit:'%'},
+  {id:'surface_pressure',     label:'Surface Pressure',   unit:'hPa'},
 ];
 const DAILY_METRICS = [
-  {id:'temperature_2m_max', label:'Temp Max (°C)'},
-  {id:'temperature_2m_min', label:'Temp Min (°C)'},
-  {id:'precipitation_sum',  label:'Precipitation Sum (mm)'},
-  {id:'rain_sum',           label:'Rain Sum (mm)'},
-  {id:'snowfall_sum',       label:'Snowfall Sum (cm)'},
-  {id:'windspeed_10m_max',  label:'Wind Speed Max (km/h)'},
-  {id:'sunrise',            label:'Sunrise'},
-  {id:'sunset',             label:'Sunset'},
+  {id:'temperature_2m_max',  label:'Temp Max',            unit:'°C'},
+  {id:'temperature_2m_min',  label:'Temp Min',            unit:'°C'},
+  {id:'precipitation_sum',   label:'Precipitation Sum',   unit:'mm'},
+  {id:'rain_sum',            label:'Rain Sum',            unit:'mm'},
+  {id:'snowfall_sum',        label:'Snowfall Sum',        unit:'cm'},
+  {id:'windspeed_10m_max',   label:'Wind Speed Max',      unit:'km/h'},
+  {id:'sunrise',             label:'Sunrise',             unit:'time'},
+  {id:'sunset',              label:'Sunset',              unit:'time'},
 ];
-const LOC_COLORS = ['#4af0b0','#3a8fff','#f0b84a','#c084fc','#f87171','#34d399','#fb923c'];
+const LOC_COLORS = ['#2563eb','#059669','#d97706','#7c3aed','#dc2626','#0891b2','#65a30d'];
+const DEFAULT_LOCS = [{name:'Ho Chi Minh City',lat:'10.8',lon:'106.6'}];
 
 let locCounter = 0;
 let allResults = [];
+let activeMetricTab = 'hourly';
+let checkedHourly = new Set(['temperature_2m','relative_humidity_2m','precipitation']);
+let checkedDaily  = new Set();
 
-// ── Location cards ────────────────────────────────────────────────────────────
-function addLocation(preset={}) {
-  const id = ++locCounter;
-  const color = LOC_COLORS[(id-1) % LOC_COLORS.length];
-  const card = document.createElement('div');
-  card.className = 'loc-card';
-  card.id = 'loc-card-' + id;
-  card.style.borderLeft = '3px solid ' + color;
-  card.innerHTML = `
-    <div class="loc-card-header">
-      <span class="loc-badge" style="background:${color}">Location ${id}</span>
-      <span class="loc-name-preview" id="loc-preview-${id}">${preset.name||'Unnamed'}</span>
-      <button class="loc-remove" onclick="removeLocation(${id})" title="Remove location">✕</button>
-    </div>
-    <div class="loc-grid">
-      <div class="form-group">
-        <label>Location Name</label>
-        <input type="text" id="loc-name-${id}" placeholder="e.g. Ho Chi Minh City" value="${preset.name||''}"
-          oninput="document.getElementById('loc-preview-${id}').textContent=this.value||'Unnamed'">
-      </div>
-      <div class="form-group">
-        <label>Latitude</label>
-        <input type="number" id="loc-lat-${id}" step="any" placeholder="e.g. 10.8" value="${preset.lat||''}">
-      </div>
-      <div class="form-group">
-        <label>Longitude</label>
-        <input type="number" id="loc-lon-${id}" step="any" placeholder="e.g. 106.6" value="${preset.lon||''}">
-      </div>
-    </div>`;
-  document.getElementById('locationsList').appendChild(card);
-  updateRemoveButtons();
-}
-
-function removeLocation(id) {
-  const card = document.getElementById('loc-card-' + id);
-  if (card) card.remove();
-  updateRemoveButtons();
-}
-
-function updateRemoveButtons() {
-  const cards = document.querySelectorAll('.loc-card');
-  cards.forEach(c => { c.querySelector('.loc-remove').style.display = cards.length <= 1 ? 'none' : ''; });
-}
-
-function getLocations() {
-  return Array.from(document.querySelectorAll('.loc-card')).map(card => {
-    const id = card.id.replace('loc-card-','');
-    return {
-      id,
-      name: document.getElementById('loc-name-'+id).value.trim() || ('Location '+id),
-      lat:  document.getElementById('loc-lat-'+id).value.trim(),
-      lon:  document.getElementById('loc-lon-'+id).value.trim(),
-    };
-  });
-}
-
-// ── Metric checkboxes ─────────────────────────────────────────────────────────
-function buildMetricList(containerId, metrics, prefix) {
-  const el = document.getElementById(containerId);
-  metrics.forEach(m => {
-    const div = document.createElement('div');
-    div.className = 'metric-item';
-    div.id = `item_${prefix}_${m.id}`;
-    div.innerHTML = `<input type="checkbox" id="${prefix}_${m.id}"><div class="check-box"></div><span class="metric-name">${m.label}</span>`;
-    div.addEventListener('click', () => {
-      const chk = document.getElementById(`${prefix}_${m.id}`);
-      chk.checked = !chk.checked;
-      div.classList.toggle('checked', chk.checked);
-      updateSelectAllBox(prefix);
-    });
-    el.appendChild(div);
-  });
-}
-buildMetricList('hourlyMetrics', HOURLY_METRICS, 'hourly');
-buildMetricList('dailyMetrics',  DAILY_METRICS,  'daily');
-['temperature_2m','relative_humidity_2m','precipitation'].forEach(id => {
-  document.getElementById('hourly_'+id).checked = true;
-  document.getElementById('item_hourly_'+id).classList.add('checked');
-});
-
-function selectAll(type) {
-  const metrics = type==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
-  const allOn = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
-  metrics.forEach(m => {
-    document.getElementById(`${type}_${m.id}`).checked = !allOn;
-    document.getElementById(`item_${type}_${m.id}`).classList.toggle('checked', !allOn);
-  });
-  updateSelectAllBox(type);
-}
-function updateSelectAllBox(type) {
-  const metrics = type==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
-  const box = document.getElementById(type==='hourly'?'allHourlyBox':'allDailyBox');
-  const allOn = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
-  box.style.background = allOn ? 'var(--accent)' : '';
-  box.style.borderColor = allOn ? 'var(--accent)' : '';
-  box.innerHTML = allOn ? '<span style="font-size:9px;color:var(--bg)">✓</span>' : '';
-}
-
-document.getElementById('toggleHourly').addEventListener('click', function(e){
-  if(e.target.tagName==='INPUT') return;
-  const chk = document.getElementById('chkHourly'); chk.checked=!chk.checked;
-  this.classList.toggle('active',chk.checked);
-  document.getElementById('hourlyGroup').classList.toggle('disabled',!chk.checked);
-});
-document.getElementById('toggleDaily').addEventListener('click', function(e){
-  if(e.target.tagName==='INPUT') return;
-  const chk = document.getElementById('chkDaily'); chk.checked=!chk.checked;
-  this.classList.toggle('active',chk.checked);
-  document.getElementById('dailyGroup').classList.toggle('disabled',!chk.checked);
-});
-
-// ── Init defaults ─────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────
 const today = new Date(), past = new Date(today);
 past.setDate(today.getDate()-30);
 document.getElementById('endDate').value   = today.toISOString().slice(0,10);
 document.getElementById('startDate').value = past.toISOString().slice(0,10);
-addLocation({name:'Ho Chi Minh City', lat:'10.8', lon:'106.6'});
+DEFAULT_LOCS.forEach(l => addLocation(l));
+renderMetricGrid();
+updateStats();
 
-// ── Messages ──────────────────────────────────────────────────────────────────
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.method-tab').forEach((b,i)=>b.classList.toggle('active',(i===0&&tab==='manual')||(i===1&&tab==='import')));
+  document.getElementById('tab-manual').classList.toggle('active',tab==='manual');
+  document.getElementById('tab-import').classList.toggle('active',tab==='import');
+}
+
+function switchMetricTab(tab) {
+  activeMetricTab = tab;
+  document.getElementById('mtab-hourly').classList.toggle('active',tab==='hourly');
+  document.getElementById('mtab-daily').classList.toggle('active',tab==='daily');
+  document.getElementById('metricSearch').value = '';
+  document.getElementById('metricTabHint').textContent = tab==='hourly' ? 'Switch tab for daily metrics' : 'Switch tab for hourly metrics';
+  renderMetricGrid();
+}
+
+// ─── Data type toggles ────────────────────────────────────────────────────────
+document.getElementById('toggleHourly').addEventListener('click', function(e){
+  if(e.target.tagName==='INPUT') return;
+  const chk = document.getElementById('chkHourly');
+  chk.checked = !chk.checked;
+  document.getElementById('ttcHourly').classList.toggle('active',chk.checked);
+  document.getElementById('ttcCheckH').style.opacity = chk.checked?'1':'0';
+});
+document.getElementById('toggleDaily').addEventListener('click', function(e){
+  if(e.target.tagName==='INPUT') return;
+  const chk = document.getElementById('chkDaily');
+  chk.checked = !chk.checked;
+  document.getElementById('ttcDaily').classList.toggle('active',chk.checked);
+  document.getElementById('ttcCheckD').style.opacity = chk.checked?'1':'0';
+});
+
+// ─── Metric grid ──────────────────────────────────────────────────────────────
+function renderMetricGrid(filter='') {
+  const grid = document.getElementById('metricGrid');
+  const metrics = activeMetricTab==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
+  const checked  = activeMetricTab==='hourly' ? checkedHourly  : checkedDaily;
+  const q = filter.toLowerCase();
+  const filtered = q ? metrics.filter(m=>m.label.toLowerCase().includes(q)||m.unit.toLowerCase().includes(q)) : metrics;
+
+  if (!filtered.length) {
+    grid.innerHTML='<div class="metric-empty">No metrics match your search.</div>';
+    return;
+  }
+  grid.innerHTML = filtered.map(m => `
+    <div class="metric-item ${checked.has(m.id)?'checked':''}" onclick="toggleMetric('${m.id}')">
+      <div class="metric-cb">
+        <svg viewBox="0 0 12 12"><polyline points="2 6 5 9 10 3"/></svg>
+      </div>
+      <div>
+        <div class="metric-label">${m.label}</div>
+        <span class="metric-unit">${m.unit}</span>
+      </div>
+    </div>
+  `).join('');
+  updateMetricCounts();
+}
+
+function toggleMetric(id) {
+  const checked = activeMetricTab==='hourly' ? checkedHourly : checkedDaily;
+  if(checked.has(id)) checked.delete(id); else checked.add(id);
+  renderMetricGrid(document.getElementById('metricSearch').value);
+  updateStats();
+}
+
+function filterMetrics() {
+  renderMetricGrid(document.getElementById('metricSearch').value);
+}
+
+function selectAllMetrics(on) {
+  const metrics = activeMetricTab==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
+  const checked  = activeMetricTab==='hourly' ? checkedHourly  : checkedDaily;
+  const q = document.getElementById('metricSearch').value.toLowerCase();
+  const filtered = q ? metrics.filter(m=>m.label.toLowerCase().includes(q)) : metrics;
+  if(on) filtered.forEach(m=>checked.add(m.id));
+  else filtered.forEach(m=>checked.delete(m.id));
+  renderMetricGrid(q);
+  updateStats();
+}
+
+function updateMetricCounts() {
+  document.getElementById('cnt-hourly').textContent = checkedHourly.size;
+  document.getElementById('cnt-daily').textContent  = checkedDaily.size;
+  document.getElementById('totalSelected').textContent = checkedHourly.size + checkedDaily.size;
+}
+
+// ─── Locations ────────────────────────────────────────────────────────────────
+function addLocation(preset={}) {
+  const id = ++locCounter;
+  const color = LOC_COLORS[(id-1)%LOC_COLORS.length];
+  const card = document.createElement('div');
+  card.className='loc-card'; card.id='loc-card-'+id;
+  card.style.borderLeft='3px solid '+color;
+  card.innerHTML=`
+    <div class="loc-card-top">
+      <div class="loc-num" style="background:${color}">${id}</div>
+      <div class="loc-name-preview" id="loc-preview-${id}">${preset.name||'Unnamed'}</div>
+      <button class="loc-del" onclick="removeLocation(${id})" title="Remove">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="loc-fields">
+      <div class="field">
+        <label class="field-label">Location Name</label>
+        <input type="text" class="input" id="loc-name-${id}" value="${preset.name||''}" placeholder="e.g. Ho Chi Minh City"
+          oninput="document.getElementById('loc-preview-${id}').textContent=this.value||'Unnamed'">
+      </div>
+      <div class="field">
+        <label class="field-label">Latitude <span>*</span></label>
+        <input type="number" class="input" id="loc-lat-${id}" step="any" value="${preset.lat||''}" placeholder="10.8">
+        <div class="field-error" id="err-lat-${id}"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">Longitude <span>*</span></label>
+        <input type="number" class="input" id="loc-lon-${id}" step="any" value="${preset.lon||''}" placeholder="106.6">
+        <div class="field-error" id="err-lon-${id}"></div>
+      </div>
+    </div>`;
+  document.getElementById('locationsList').appendChild(card);
+  updateRemoveBtns();
+  updateStats();
+}
+
+function removeLocation(id) {
+  const c=document.getElementById('loc-card-'+id); if(c)c.remove();
+  updateRemoveBtns(); updateStats();
+}
+function updateRemoveBtns() {
+  const cards=document.querySelectorAll('.loc-card');
+  cards.forEach(c=>{c.querySelector('.loc-del').style.display=cards.length<=1?'none':'flex';});
+}
+function getLocations() {
+  return Array.from(document.querySelectorAll('.loc-card')).map(c=>{
+    const id=c.id.replace('loc-card-','');
+    return {id,name:document.getElementById('loc-name-'+id).value.trim()||('Location '+id),
+      lat:document.getElementById('loc-lat-'+id).value.trim(),
+      lon:document.getElementById('loc-lon-'+id).value.trim()};
+  });
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('stat-locs').textContent = document.querySelectorAll('.loc-card').length;
+  document.getElementById('stat-metrics').textContent = checkedHourly.size + checkedDaily.size;
+  updateMetricCounts();
+}
+
+// ─── Messages ─────────────────────────────────────────────────────────────────
 function showError(msg) {
-  const el=document.getElementById('errMsg'); el.textContent='⚠  '+msg; el.classList.add('visible');
-  document.getElementById('successMsg').classList.remove('visible');
+  const el=document.getElementById('alertError');
+  document.getElementById('alertErrorText').textContent=msg;
+  el.classList.add('visible');
+  document.getElementById('alertSuccess').classList.remove('visible');
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function showSuccess(msg) {
-  const el=document.getElementById('successMsg'); el.textContent='✓  '+msg; el.classList.add('visible');
-  document.getElementById('errMsg').classList.remove('visible');
+  const el=document.getElementById('alertSuccess');
+  document.getElementById('alertSuccessText').textContent=msg;
+  el.classList.add('visible');
+  document.getElementById('alertError').classList.remove('visible');
 }
-function hideMessages() {
-  document.getElementById('errMsg').classList.remove('visible');
-  document.getElementById('successMsg').classList.remove('visible');
+function hideAlerts() {
+  document.getElementById('alertError').classList.remove('visible');
+  document.getElementById('alertSuccess').classList.remove('visible');
+}
+function fieldErr(id,msg) {
+  const el=document.getElementById('err-'+id); if(!el)return;
+  el.textContent=msg; el.classList.toggle('visible',!!msg);
+  const inp=document.getElementById(id); if(inp)inp.classList.toggle('error',!!msg);
+}
+function clearAllErrors() {
+  document.querySelectorAll('.field-error').forEach(e=>{e.textContent='';e.classList.remove('visible')});
+  document.querySelectorAll('.input.error').forEach(i=>i.classList.remove('error'));
 }
 
-// ── Validation ────────────────────────────────────────────────────────────────
+// ─── Validation ───────────────────────────────────────────────────────────────
 function validate() {
-  const locs = getLocations();
-  const start = document.getElementById('startDate').value;
-  const end   = document.getElementById('endDate').value;
-  const useH  = document.getElementById('chkHourly').checked;
-  const useD  = document.getElementById('chkDaily').checked;
-
-  if (!locs.length) { showError('Add at least one location.'); return false; }
-  for (const loc of locs) {
-    if (!loc.lat) { showError(`"${loc.name}": Latitude is required.`); return false; }
-    if (!loc.lon) { showError(`"${loc.name}": Longitude is required.`); return false; }
-    if (isNaN(+loc.lat)||+loc.lat<-90||+loc.lat>90)   { showError(`"${loc.name}": Latitude must be -90 to 90.`); return false; }
-    if (isNaN(+loc.lon)||+loc.lon<-180||+loc.lon>180) { showError(`"${loc.name}": Longitude must be -180 to 180.`); return false; }
+  clearAllErrors(); hideAlerts();
+  const locs=getLocations(), start=document.getElementById('startDate').value, end=document.getElementById('endDate').value;
+  const useH=document.getElementById('chkHourly').checked, useD=document.getElementById('chkDaily').checked;
+  let ok=true;
+  if(!locs.length){showError('Add at least one location.');return false;}
+  for(const loc of locs){
+    if(!loc.lat){fieldErr('lat-'+loc.id,'Required');ok=false;}
+    else if(isNaN(+loc.lat)||+loc.lat<-90||+loc.lat>90){fieldErr('lat-'+loc.id,'Must be −90 to 90');ok=false;}
+    if(!loc.lon){fieldErr('lon-'+loc.id,'Required');ok=false;}
+    else if(isNaN(+loc.lon)||+loc.lon<-180||+loc.lon>180){fieldErr('lon-'+loc.id,'Must be −180 to 180');ok=false;}
   }
-  if (!start) { showError('Start date is required.'); return false; }
-  if (!end)   { showError('End date is required.'); return false; }
-  if (start>end) { showError('Start date must be before or equal to end date.'); return false; }
-  if (!useH&&!useD) { showError('Select at least one data type.'); return false; }
-  if (useH && !HOURLY_METRICS.some(m=>document.getElementById('hourly_'+m.id).checked)) { showError('Select at least one Hourly metric.'); return false; }
-  if (useD && !DAILY_METRICS.some(m=>document.getElementById('daily_'+m.id).checked))  { showError('Select at least one Daily metric.'); return false; }
+  if(!start){fieldErr('startDate','Required');ok=false;}
+  if(!end){fieldErr('endDate','Required');ok=false;}
+  if(start&&end&&start>end){fieldErr('endDate','Must be after start date');ok=false;}
+  if(!useH&&!useD){showError('Select at least one data type (Hourly or Daily).');return false;}
+  if(useH&&!checkedHourly.size){showError('Select at least one Hourly metric.');return false;}
+  if(useD&&!checkedDaily.size){showError('Select at least one Daily metric.');return false;}
+  if(!ok){showError('Please fix the errors highlighted above.');return false;}
   return true;
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
+// ─── Fetch ────────────────────────────────────────────────────────────────────
 async function fetchAllData() {
-  hideMessages();
-  if (!validate()) return;
+  if(!validate())return;
+  const locs=getLocations(), start=document.getElementById('startDate').value, end=document.getElementById('endDate').value;
+  const useH=document.getElementById('chkHourly').checked, useD=document.getElementById('chkDaily').checked;
 
-  const locs  = getLocations();
-  const start = document.getElementById('startDate').value;
-  const end   = document.getElementById('endDate').value;
-  const useH  = document.getElementById('chkHourly').checked;
-  const useD  = document.getElementById('chkDaily').checked;
-  const hMetrics = HOURLY_METRICS.filter(m=>document.getElementById('hourly_'+m.id).checked).map(m=>m.id);
-  const dMetrics = DAILY_METRICS.filter(m=>document.getElementById('daily_'+m.id).checked).map(m=>m.id);
-
-  // Reset UI
-  document.getElementById('fetchBtn').disabled = true;
-  document.getElementById('exportBtn').disabled = true;
+  document.getElementById('fetchBtn').disabled=true;
+  document.getElementById('exportBtn').disabled=true;
   document.getElementById('spinner').classList.add('visible');
-  document.getElementById('results').innerHTML = '';
   document.getElementById('progressWrap').classList.add('visible');
-  document.getElementById('progressFill').style.width = '0%';
-  allResults = [];
+  document.getElementById('progressFill').style.width='0%';
+  document.getElementById('emptyState')&&(document.getElementById('emptyState').style.display='none');
+  document.getElementById('results').innerHTML='<div id="emptyState" style="display:none"></div>';
+  allResults=[];
 
-  const errors = [];
-
-  for (let i=0; i<locs.length; i++) {
-    const loc = locs[i];
-    document.getElementById('progressLabel').textContent = `Fetching ${i+1} / ${locs.length}: ${loc.name}`;
-    document.getElementById('spinnerText').textContent = loc.name + '…';
-    document.getElementById('progressFill').style.width = Math.round((i/locs.length)*100)+'%';
-
-    const params = new URLSearchParams({latitude:loc.lat, longitude:loc.lon, start_date:start, end_date:end, timezone:'auto'});
-    if (useH) params.append('hourly', hMetrics.join(','));
-    if (useD) params.append('daily',  dMetrics.join(','));
-
-    try {
-      const res = await fetch('https://archive-api.open-meteo.com/v1/archive?'+params.toString());
-      if (!res.ok) {
-        let r='HTTP '+res.status; try{const e=await res.json();r=e.reason||r;}catch{}
-        throw new Error(r);
-      }
-      const data = await res.json();
-      allResults.push({name:loc.name, lat:loc.lat, lon:loc.lon, data});
-    } catch(e) {
-      errors.push(`"${loc.name}": ${e.message}`);
-    }
+  const errors=[];
+  for(let i=0;i<locs.length;i++){
+    const loc=locs[i];
+    const pct=Math.round((i/locs.length)*100);
+    document.getElementById('progressFill').style.width=pct+'%';
+    document.getElementById('progressPct').textContent=pct+'%';
+    document.getElementById('progressLabel').textContent=`${i+1}/${locs.length}: ${loc.name}`;
+    document.getElementById('spinnerText').textContent=loc.name+'…';
+    const params=new URLSearchParams({latitude:loc.lat,longitude:loc.lon,start_date:start,end_date:end,timezone:'auto'});
+    if(useH)params.append('hourly',[...checkedHourly].join(','));
+    if(useD)params.append('daily',[...checkedDaily].join(','));
+    try{
+      const res=await fetch('https://archive-api.open-meteo.com/v1/archive?'+params);
+      if(!res.ok){let r='HTTP '+res.status;try{const e=await res.json();r=e.reason||r;}catch{}throw new Error(r);}
+      const data=await res.json();
+      allResults.push({name:loc.name,lat:loc.lat,lon:loc.lon,data,color:LOC_COLORS[(i)%LOC_COLORS.length]});
+    }catch(e){errors.push(`"${loc.name}": ${e.message}`);}
   }
 
-  document.getElementById('progressFill').style.width = '100%';
-  document.getElementById('progressLabel').textContent = `Done — ${allResults.length}/${locs.length} locations fetched`;
+  document.getElementById('progressFill').style.width='100%';
+  document.getElementById('progressPct').textContent='100%';
+  document.getElementById('progressLabel').textContent=`Done — ${allResults.length}/${locs.length} locations`;
   document.getElementById('spinner').classList.remove('visible');
-  document.getElementById('fetchBtn').disabled = false;
+  document.getElementById('fetchBtn').disabled=false;
 
-  if (allResults.length) {
-    renderAll();
-    document.getElementById('exportBtn').disabled = false;
-    const totalH = allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
-    const totalD = allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
-    const parts=[]; if(totalH) parts.push(totalH.toLocaleString()+' hourly'); if(totalD) parts.push(totalD.toLocaleString()+' daily');
-    if (errors.length) showError(`${errors.length} failed: ${errors.join('; ')}. Fetched: ${allResults.length} location(s).`);
+  if(allResults.length){
+    renderResults();
+    document.getElementById('exportBtn').disabled=false;
+    const totalH=allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
+    const totalD=allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
+    const parts=[];if(totalH)parts.push(totalH.toLocaleString()+' hourly');if(totalD)parts.push(totalD.toLocaleString()+' daily');
+    document.getElementById('stat-records').textContent=(totalH+totalD).toLocaleString();
+    if(errors.length)showError(`${errors.length} failed: ${errors.join('; ')}`);
     else showSuccess(`${allResults.length} location(s) fetched — ${parts.join(' · ')} records`);
-  } else {
+  }else{
     showError('All requests failed. '+errors.join(' | '));
     document.getElementById('progressWrap').classList.remove('visible');
+    renderEmptyState();
   }
 }
 
-// ── Render tables ─────────────────────────────────────────────────────────────
-function renderAll() {
-  const container = document.getElementById('results');
-  container.innerHTML = '';
-  allResults.forEach((r,idx) => {
-    const color = LOC_COLORS[idx % LOC_COLORS.length];
-    const block = document.createElement('div');
-    block.className = 'results-location-block';
+// ─── Render results ───────────────────────────────────────────────────────────
+function renderResults() {
+  const container=document.getElementById('results');
+  container.innerHTML='';
+  allResults.forEach(r=>{
+    const sec=document.createElement('div');
+    sec.className='results-section';
+    // Header row
+    const hrow=document.createElement('div');
+    hrow.className='results-header-row';
+    hrow.innerHTML=`
+      <div class="results-location-label">
+        <div class="loc-dot" style="background:${r.color}"></div>
+        ${r.name}
+      </div>
+      <div class="results-coords">${r.lat}°, ${r.lon}°</div>`;
+    sec.appendChild(hrow);
 
-    const hdr = document.createElement('div');
-    hdr.className = 'results-loc-header';
-    hdr.style.borderBottomColor = color;
-    hdr.innerHTML = `<div class="results-loc-name" style="color:${color}">${r.name}</div><div class="results-loc-coords">${r.lat}°N, ${r.lon}°E</div>`;
-    block.appendChild(hdr);
-
-    if (r.data.hourly?.time?.length) block.appendChild(buildSection('Hourly Data', r.data.hourly, HOURLY_METRICS));
-    if (r.data.daily?.time?.length)  block.appendChild(buildSection('Daily Data',  r.data.daily,  DAILY_METRICS));
-    container.appendChild(block);
+    // Sub-tabs
+    const hasH=r.data.hourly?.time?.length, hasD=r.data.daily?.time?.length;
+    if(hasH&&hasD){
+      const tabsEl=document.createElement('div'); tabsEl.className='result-tabs';
+      tabsEl.innerHTML=`<button class="result-tab active" onclick="switchResultTab(this,'rt-h-${r.name.replace(/\s/g,'-')}','rt-d-${r.name.replace(/\s/g,'-')}')">⏱ Hourly (${hasH.toLocaleString()})</button>
+        <button class="result-tab" onclick="switchResultTab(this,'rt-d-${r.name.replace(/\s/g,'-')}','rt-h-${r.name.replace(/\s/g,'-')}')">📅 Daily (${hasD.toLocaleString()})</button>`;
+      sec.appendChild(tabsEl);
+      const wH=buildTableCard(r.data.hourly,HOURLY_METRICS); wH.id='rt-h-'+r.name.replace(/\s/g,'-'); sec.appendChild(wH);
+      const wD=buildTableCard(r.data.daily,DAILY_METRICS);   wD.id='rt-d-'+r.name.replace(/\s/g,'-'); wD.style.display='none'; sec.appendChild(wD);
+    }else if(hasH){sec.appendChild(buildTableCard(r.data.hourly,HOURLY_METRICS));}
+    else if(hasD){sec.appendChild(buildTableCard(r.data.daily,DAILY_METRICS));}
+    container.appendChild(sec);
   });
 }
 
-function buildSection(title, dataset, metricDefs) {
-  const keys = Object.keys(dataset).filter(k=>k!=='time');
-  const total = dataset.time.length;
-  const LIMIT = 200;
+function switchResultTab(btn,showId,hideId) {
+  btn.parentElement.querySelectorAll('.result-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(showId).style.display='';
+  document.getElementById(hideId).style.display='none';
+}
 
-  const section = document.createElement('div'); section.className='results-section';
-  const hdr = document.createElement('div'); hdr.className='results-header';
-  hdr.innerHTML=`<div class="results-title">${title}</div><div class="results-count">${total.toLocaleString()} records · ${keys.length} metrics</div>`;
-  section.appendChild(hdr);
-
-  const wrap = document.createElement('div'); wrap.className='table-wrap';
-  const table = document.createElement('table');
-
-  const thead=document.createElement('thead'), htr=document.createElement('tr');
-  ['Time / Date',...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?d.label:k;})].forEach(h=>{
+function buildTableCard(dataset,metricDefs) {
+  const keys=Object.keys(dataset).filter(k=>k!=='time');
+  const total=dataset.time.length; const LIMIT=200;
+  const card=document.createElement('div'); card.className='table-card';
+  const wrap=document.createElement('div'); wrap.className='table-wrap';
+  const tbl=document.createElement('table');
+  // thead
+  const thead=document.createElement('thead'),htr=document.createElement('tr');
+  ['Date / Time',...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?`${d.label} (${d.unit})`:k;})].forEach(h=>{
     const th=document.createElement('th');th.textContent=h;htr.appendChild(th);
   });
-  thead.appendChild(htr);table.appendChild(thead);
-
+  thead.appendChild(htr);tbl.appendChild(thead);
+  // tbody
   const tbody=document.createElement('tbody');
   for(let i=0;i<Math.min(total,LIMIT);i++){
     const tr=document.createElement('tr');
@@ -649,50 +1061,116 @@ function buildSection(title, dataset, metricDefs) {
     keys.forEach(k=>{const td=document.createElement('td');const v=dataset[k][i];td.textContent=(v===null||v===undefined)?'—':v;tr.appendChild(td);});
     tbody.appendChild(tr);
   }
-  table.appendChild(tbody);wrap.appendChild(table);
-
-  if (total>LIMIT) {
-    const note=document.createElement('div');note.className='table-note';
-    note.textContent=`Showing ${LIMIT} of ${total.toLocaleString()} rows. All records are included in Excel export.`;
-    wrap.appendChild(note);
-  }
-  section.appendChild(wrap);
-  return section;
+  tbl.appendChild(tbody);wrap.appendChild(tbl);card.appendChild(wrap);
+  // footer
+  const foot=document.createElement('div');foot.className='table-footer';
+  foot.innerHTML=`<span>${total>LIMIT?`Showing first ${LIMIT} of ${total.toLocaleString()} rows`:total.toLocaleString()+' rows'}</span><span>${keys.length} metric${keys.length!==1?'s':''}</span>`;
+  card.appendChild(foot);
+  return card;
 }
 
-// ── Export ────────────────────────────────────────────────────────────────────
+function renderEmptyState() {
+  document.getElementById('results').innerHTML=`<div class="empty-state"><div class="empty-icon">🌤</div><div class="empty-title">No Data Yet</div><div class="empty-desc">Configure locations, date range, and metrics, then click <strong>Fetch Weather Data</strong>.</div></div>`;
+}
+
+// ─── Reset ────────────────────────────────────────────────────────────────────
+function resetForm() {
+  if(!confirm('Reset all inputs and results?'))return;
+  document.getElementById('locationsList').innerHTML=''; locCounter=0;
+  addLocation({name:'Ho Chi Minh City',lat:'10.8',lon:'106.6'});
+  const t=new Date(),p=new Date(t); p.setDate(t.getDate()-30);
+  document.getElementById('endDate').value=t.toISOString().slice(0,10);
+  document.getElementById('startDate').value=p.toISOString().slice(0,10);
+  checkedHourly=new Set(['temperature_2m','relative_humidity_2m','precipitation']); checkedDaily=new Set();
+  renderMetricGrid(); hideAlerts(); clearAllErrors();
+  allResults=[]; renderEmptyState();
+  document.getElementById('exportBtn').disabled=true;
+  document.getElementById('progressWrap').classList.remove('visible');
+  document.getElementById('spinner').classList.remove('visible');
+  document.getElementById('stat-records').textContent='—';
+  updateStats();
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
 function exportExcel() {
-  if (!allResults.length) { showError('No data to export.'); return; }
-  const wb = XLSX.utils.book_new();
-  const start = document.getElementById('startDate').value;
-  const end   = document.getElementById('endDate').value;
-
-  allResults.forEach(r => {
-    // Sheet name: sanitize, max 29 chars + _H/_D suffix = 31
-    const safe = r.name.replace(/[:\\/\?\*\[\]]/g,'').trim().slice(0,27);
-    if (r.data.hourly?.time?.length) {
-      XLSX.utils.book_append_sheet(wb, makeSheet(r.data.hourly, HOURLY_METRICS, r), (safe+'_H').slice(0,31));
-    }
-    if (r.data.daily?.time?.length) {
-      XLSX.utils.book_append_sheet(wb, makeSheet(r.data.daily, DAILY_METRICS, r), (safe+'_D').slice(0,31));
-    }
+  if(!allResults.length){showError('No data to export.');return;}
+  const wb=XLSX.utils.book_new();
+  const start=document.getElementById('startDate').value, end=document.getElementById('endDate').value;
+  allResults.forEach(r=>{
+    const safe=r.name.replace(/[:\\/\?\*\[\]]/g,'').trim().slice(0,27);
+    if(r.data.hourly?.time?.length)XLSX.utils.book_append_sheet(wb,makeSheet(r.data.hourly,HOURLY_METRICS,r),(safe+'_H').slice(0,31));
+    if(r.data.daily?.time?.length) XLSX.utils.book_append_sheet(wb,makeSheet(r.data.daily, DAILY_METRICS, r),(safe+'_D').slice(0,31));
   });
-
-  const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
-  XLSX.writeFile(wb, filename);
-  showSuccess(`Exported: ${filename} · ${wb.SheetNames.length} sheets`);
+  XLSX.writeFile(wb,`weather_${allResults.length}loc_${start}_${end}.xlsx`);
+  showSuccess(`Exported ${wb.SheetNames.length} sheets for ${allResults.length} location(s).`);
 }
 
-function makeSheet(dataset, metricDefs, loc) {
-  const keys = Object.keys(dataset).filter(k=>k!=='time');
-  const headers = ['Time / Date', ...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?d.label:k;})];
-  const rows = dataset.time.map((t,i)=>[t,...keys.map(k=>{const v=dataset[k][i];return(v===null||v===undefined)?'':v;})]);
-
-  // Info rows at top for traceability
-  const infoRow1 = ['Location:', loc.name, '', 'Latitude:', loc.lat, 'Longitude:', loc.lon];
-  const infoRow2 = [];
-  return XLSX.utils.aoa_to_sheet([infoRow1, infoRow2, headers, ...rows]);
+function makeSheet(dataset,metricDefs,loc) {
+  const keys=Object.keys(dataset).filter(k=>k!=='time');
+  const headers=['Time / Date',...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?`${d.label} (${d.unit})`:k;})];
+  const rows=dataset.time.map((t,i)=>[t,...keys.map(k=>{const v=dataset[k][i];return(v===null||v===undefined)?'':v;})]);
+  return XLSX.utils.aoa_to_sheet([['Location:',loc.name,'','Lat:',loc.lat,'Lon:',loc.lon],[],headers,...rows]);
 }
+
+// ─── Import Excel ─────────────────────────────────────────────────────────────
+function downloadTemplate() {
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet([
+    ['Location Name','Latitude','Longitude'],
+    ['Ho Chi Minh City',10.8,106.6],
+    ['Ha Noi',21.03,105.85],
+    ['Da Nang',16.05,108.2],
+  ]);
+  ws['!cols']=[{wch:24},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws,'locations');
+  XLSX.writeFile(wb,'weather_locations_template.xlsx');
+}
+
+function handleUpload(input) {
+  const file=input.files[0]; if(!file)return;
+  const fb=document.getElementById('importFeedback');
+  fb.className='import-feedback'; fb.textContent='';
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      let hi=-1;
+      for(let i=0;i<rows.length;i++){
+        const r=rows[i].map(c=>String(c).toLowerCase());
+        if(r.some(c=>c.includes('lat'))&&r.some(c=>c.includes('lon'))){hi=i;break;}
+      }
+      if(hi===-1){fb.className='import-feedback err';fb.textContent='Header row not found. Make sure template has Latitude and Longitude columns.';return;}
+      const hdrs=rows[hi].map(c=>String(c).toLowerCase().trim());
+      const ni=hdrs.findIndex(h=>h.includes('name')||h.includes('location'));
+      const li=hdrs.findIndex(h=>h.includes('lat')), loi=hdrs.findIndex(h=>h.includes('lon'));
+      if(li===-1||loi===-1){fb.className='import-feedback err';fb.textContent='Missing Latitude or Longitude columns.';return;}
+      const data=rows.slice(hi+1).filter(r=>String(r[li]).trim()!=='');
+      if(!data.length){fb.className='import-feedback err';fb.textContent='No data rows found.';return;}
+      document.getElementById('locationsList').innerHTML=''; locCounter=0;
+      data.forEach(row=>{
+        addLocation({name:ni>=0?String(row[ni]||'').trim():'',lat:String(row[li]).trim(),lon:String(row[loi]).trim()});
+      });
+      fb.className='import-feedback ok';fb.textContent=`✓ Imported ${data.length} location(s). Switching to manual view…`;
+      setTimeout(()=>switchTab('manual'),1200);
+    }catch(err){fb.className='import-feedback err';fb.textContent='Failed to parse file: '+err.message;}
+    input.value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Drag & drop
+document.addEventListener('DOMContentLoaded',()=>{
+  const zone=document.getElementById('importZone'); if(!zone)return;
+  zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});
+  zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
+  zone.addEventListener('drop',e=>{
+    e.preventDefault();zone.classList.remove('dragover');
+    const f=e.dataTransfer.files[0]; if(!f)return;
+    handleUpload({files:[f],value:''});
+  });
+});
 </script>
 </body>
 </html>
