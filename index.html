@@ -746,6 +746,7 @@ document.getElementById('startDate').value = past.toISOString().slice(0,10);
 DEFAULT_LOCS.forEach(l => addLocation(l));
 renderMetricGrid();
 updateStats();
+syncMetricTabsToDataType(); // hide Daily tab on init since only Hourly is checked by default
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -770,6 +771,7 @@ document.getElementById('toggleHourly').addEventListener('click', function(e){
   chk.checked = !chk.checked;
   document.getElementById('ttcHourly').classList.toggle('active',chk.checked);
   document.getElementById('ttcCheckH').style.opacity = chk.checked?'1':'0';
+  syncMetricTabsToDataType();
 });
 document.getElementById('toggleDaily').addEventListener('click', function(e){
   if(e.target.tagName==='INPUT') return;
@@ -777,7 +779,34 @@ document.getElementById('toggleDaily').addEventListener('click', function(e){
   chk.checked = !chk.checked;
   document.getElementById('ttcDaily').classList.toggle('active',chk.checked);
   document.getElementById('ttcCheckD').style.opacity = chk.checked?'1':'0';
+  syncMetricTabsToDataType();
 });
+
+// Sync metric panel tabs to match which data types are enabled
+function syncMetricTabsToDataType() {
+  const useH = document.getElementById('chkHourly').checked;
+  const useD  = document.getElementById('chkDaily').checked;
+  const tabH  = document.getElementById('mtab-hourly');
+  const tabD  = document.getElementById('mtab-daily');
+
+  // Show/hide tabs based on selection
+  tabH.style.display = useH ? '' : 'none';
+  tabD.style.display = useD ? '' : 'none';
+
+  // Auto-switch: if current tab was just disabled, go to the enabled one
+  if (activeMetricTab === 'hourly' && !useH && useD) switchMetricTab('daily');
+  else if (activeMetricTab === 'daily' && !useD && useH) switchMetricTab('hourly');
+  // If a new type was just enabled (and wasn't the active one), auto-switch to it
+  else if (useH && !useD && activeMetricTab !== 'hourly') switchMetricTab('hourly');
+  else if (useD && !useH && activeMetricTab !== 'daily') switchMetricTab('daily');
+
+  // Update hint text
+  if (useH && useD) {
+    document.getElementById('metricTabHint').textContent = activeMetricTab==='hourly' ? 'Switch tab for daily metrics' : 'Switch tab for hourly metrics';
+  } else {
+    document.getElementById('metricTabHint').textContent = '';
+  }
+}
 
 // ─── Metric grid ──────────────────────────────────────────────────────────────
 function renderMetricGrid(filter='') {
