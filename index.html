@@ -4,233 +4,251 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Weather Archive — Historical Climate Data Explorer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.input-tab').forEach((btn, i) => {
+    btn.classList.toggle('active', (i===0&&tab==='manual')||(i===1&&tab==='import'));
+  });
+  document.getElementById('tab-manual').classList.toggle('active', tab==='manual');
+  document.getElementById('tab-import').classList.toggle('active', tab==='import');
+}
+
+// ── Download template ─────────────────────────────────────────────────────────
+function downloadTemplate() {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['Location Name', 'Latitude', 'Longitude'],
+    ['Ho Chi Minh City', 10.8, 106.6],
+    ['Ha Noi', 21.03, 105.85],
+    ['Da Nang', 16.05, 108.2],
+  ]);
+  // Column widths
+  ws['!cols'] = [{wch:24},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, ws, 'locations');
+  XLSX.writeFile(wb, 'weather_locations_template.xlsx');
+}
+
+// ── Upload & parse template ───────────────────────────────────────────────────
+function handleUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  // Drag-drop zone feedback
+  setImportStatus('', '');
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+      // Find header row (look for "Location Name" or "Latitude")
+      let headerIdx = -1;
+      for (let i=0; i<rows.length; i++) {
+        const r = rows[i].map(c=>String(c).toLowerCase());
+        if (r.some(c=>c.includes('location')) && r.some(c=>c.includes('lat'))) {
+          headerIdx = i; break;
+        }
+      }
+      if (headerIdx === -1) { setImportStatus('err', 'Could not find header row. Make sure the template has "Location Name", "Latitude", "Longitude" columns.'); return; }
+
+      const headers = rows[headerIdx].map(c=>String(c).toLowerCase().trim());
+      const nameIdx = headers.findIndex(h=>h.includes('name')||h.includes('location'));
+      const latIdx  = headers.findIndex(h=>h.includes('lat'));
+      const lonIdx  = headers.findIndex(h=>h.includes('lon'));
+
+      if (latIdx===-1||lonIdx===-1) { setImportStatus('err', 'Missing Latitude or Longitude columns.'); return; }
+
+      const dataRows = rows.slice(headerIdx+1).filter(r=>r[latIdx]!==''&&r[latIdx]!==undefined);
+      if (!dataRows.length) { setImportStatus('err', 'No data rows found below the header.'); return; }
+
+      // Clear existing locations and load new ones
+      document.getElementById('locationsList').innerHTML = '';
+      locCounter = 0;
+      dataRows.forEach(row => {
+        const name = nameIdx>=0 ? String(row[nameIdx]||'').trim() : '';
+        const lat  = String(row[latIdx]).trim();
+        const lon  = String(row[lonIdx]).trim();
+        addLocation({name: name||('Location '+(locCounter+1)), lat, lon});
+      });
+
+      setImportStatus('ok', `Imported ${dataRows.length} location(s) successfully. Switch to Manual Input tab to review or edit.`);
+      // Auto-switch to manual tab after short delay
+      setTimeout(()=>switchTab('manual'), 1200);
+
+    } catch(err) {
+      setImportStatus('err', 'Failed to parse file: ' + err.message);
+    }
+    // Reset input so same file can be re-uploaded
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function setImportStatus(type, msg) {
+  const el = document.getElementById('importStatus');
+  el.className = 'import-status' + (type ? ' '+type : '');
+  el.textContent = msg;
+}
+
+// ── Drag & drop on import zone ────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const zone = document.getElementById('importZone');
+  if (!zone) return;
+  zone.addEventListener('dragover', e=>{ e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', ()=>zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e=>{
+    e.preventDefault(); zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const fakeInput = {files:[file], value:''};
+    handleUpload(fakeInput);
+  });
+});
+</script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0e14;
-    --surface: #111720;
-    --surface2: #1a2233;
-    --border: #1f2d42;
-    --accent: #4af0b0;
-    --accent2: #3a8fff;
-    --accent3: #f0b84a;
-    --text: #c8d8f0;
-    --text-dim: #5a7090;
-    --text-bright: #e8f4ff;
-    --danger: #ff5a6e;
-    --success: #4af0b0;
-    --mono: 'DM Mono', monospace;
-    --serif: 'Fraunces', Georgia, serif;
-    --radius: 4px;
+    --bg:#0a0e14;--surface:#111720;--surface2:#1a2233;--border:#1f2d42;
+    --accent:#4af0b0;--accent2:#3a8fff;--accent3:#f0b84a;--accent4:#c084fc;
+    --text:#c8d8f0;--text-dim:#5a7090;--text-bright:#e8f4ff;
+    --danger:#ff5a6e;--success:#4af0b0;
+    --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--radius:4px;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 13px;
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(74,240,176,0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(74,240,176,0.03) 1px, transparent 1px);
-    background-size: 40px 40px;
-    pointer-events: none;
-    z-index: 0;
-  }
-  .container {
-    position: relative;
-    z-index: 1;
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 40px 24px 80px;
-  }
-  header { margin-bottom: 48px; border-bottom: 1px solid var(--border); padding-bottom: 32px; }
-  .header-tag {
-    font-size: 11px;
-    color: var(--accent);
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .header-tag::before {
-    content: '';
-    display: inline-block;
-    width: 20px;
-    height: 1px;
-    background: var(--accent);
-  }
-  h1 {
-    font-family: var(--serif);
-    font-size: clamp(28px, 5vw, 48px);
-    font-weight: 300;
-    color: var(--text-bright);
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-  }
-  h1 em { font-style: italic; color: var(--accent); }
-  .header-desc {
-    margin-top: 12px;
-    color: var(--text-dim);
-    font-size: 12px;
-    line-height: 1.6;
-    max-width: 480px;
-  }
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 28px;
-    margin-bottom: 20px;
-    position: relative;
-    overflow: hidden;
-  }
-  .panel::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--accent2), transparent);
-    opacity: 0.3;
-  }
-  .panel-label {
-    font-size: 10px;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--accent2);
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .panel-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
-  label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
-  input[type="number"], input[type="date"] {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text-bright);
-    font-family: var(--mono);
-    font-size: 13px;
-    padding: 10px 14px;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    width: 100%;
-    color-scheme: dark;
-  }
-  input:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(58,143,255,0.12); }
-  .type-row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .type-toggle {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 18px;
-    transition: border-color 0.2s, background 0.2s;
-    user-select: none;
-  }
-  .type-toggle:hover { border-color: var(--text-dim); }
-  .type-toggle input[type="checkbox"] { display: none; }
-  .type-toggle.active { border-color: var(--accent); background: rgba(74,240,176,0.06); color: var(--accent); }
-  .type-indicator { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; transition: background 0.2s; }
-  .type-toggle.active .type-indicator { background: var(--accent); }
-  .metrics-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .metrics-group { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-  .metrics-group.disabled { opacity: 0.3; pointer-events: none; }
-  .metrics-group-title { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-  .metrics-group-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent3); flex-shrink: 0; }
-  .metrics-group-title .dot.blue { background: var(--accent2); }
-  .metric-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; transition: color 0.15s; }
-  .metric-item:hover { color: var(--text-bright); }
-  .metric-item input[type="checkbox"] { display: none; }
-  .check-box {
-    width: 14px; height: 14px;
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  .metric-item.checked .check-box { border-color: var(--accent); background: var(--accent); }
-  .check-box::after { content: '✓'; font-size: 9px; color: var(--bg); opacity: 0; transition: opacity 0.15s; }
-  .metric-item.checked .check-box::after { opacity: 1; }
-  .metric-name { font-size: 12px; color: var(--text-dim); transition: color 0.15s; }
-  .metric-item.checked .metric-name { color: var(--text-bright); }
-  .select-all-row {
-    display: flex; align-items: center; gap: 8px;
-    padding-bottom: 10px; margin-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer; color: var(--text-dim);
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-  }
-  .select-all-row:hover { color: var(--text-bright); }
-  .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .btn {
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
-    border: none; border-radius: var(--radius); cursor: pointer;
-    padding: 12px 24px; transition: all 0.2s;
-    display: inline-flex; align-items: center; gap: 8px;
-    text-transform: uppercase;
-  }
-  .btn-primary { background: var(--accent); color: var(--bg); font-weight: 500; }
-  .btn-primary:hover { background: #6af8c0; box-shadow: 0 0 20px rgba(74,240,176,0.25); }
-  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
-  .btn-export { background: transparent; border: 1px solid var(--accent3); color: var(--accent3); }
-  .btn-export:hover { background: rgba(240,184,74,0.08); box-shadow: 0 0 16px rgba(240,184,74,0.15); }
-  .btn-export:disabled { opacity: 0.3; cursor: not-allowed; }
-  .spinner { display: none; align-items: center; gap: 10px; color: var(--text-dim); font-size: 12px; }
-  .spinner.visible { display: flex; }
-  .spin-ring { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .msg { padding: 12px 16px; border-radius: var(--radius); font-size: 12px; margin-top: 16px; display: none; }
-  .msg.visible { display: block; }
-  .msg-error { background: rgba(255,90,110,0.08); border: 1px solid rgba(255,90,110,0.3); color: var(--danger); }
-  .msg-success { background: rgba(74,240,176,0.08); border: 1px solid rgba(74,240,176,0.3); color: var(--success); }
-  .api-url-display {
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 10px 14px; font-size: 11px; color: var(--text-dim);
-    word-break: break-all; line-height: 1.6; margin-top: 16px; display: none;
-  }
-  .api-url-display .lbl { color: var(--accent2); }
-  #results { margin-top: 32px; }
-  .results-section { margin-bottom: 32px; }
-  .results-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .results-title { font-family: var(--serif); font-size: 20px; font-weight: 300; color: var(--text-bright); }
-  .results-count { font-size: 11px; color: var(--text-dim); }
-  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  thead th {
-    background: var(--surface2); color: var(--text-dim);
-    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-    padding: 10px 14px; text-align: left; white-space: nowrap;
-    border-bottom: 1px solid var(--border); position: sticky; top: 0;
-  }
-  tbody tr { border-bottom: 1px solid rgba(31,45,66,0.5); transition: background 0.1s; }
-  tbody tr:hover { background: var(--surface2); }
-  tbody tr:last-child { border-bottom: none; }
-  tbody td { padding: 8px 14px; color: var(--text); white-space: nowrap; }
-  tbody td:first-child { color: var(--accent2); font-size: 11px; }
-  .table-note { padding: 10px 14px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); }
-  @media (max-width: 640px) {
-    .form-grid { grid-template-columns: 1fr; }
-    .metrics-sections { grid-template-columns: 1fr; }
-  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh;overflow-x:hidden}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(74,240,176,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(74,240,176,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+  .container{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:40px 24px 80px}
+  header{margin-bottom:48px;border-bottom:1px solid var(--border);padding-bottom:32px}
+  .header-tag{font-size:11px;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .header-tag::before{content:'';display:inline-block;width:20px;height:1px;background:var(--accent)}
+  h1{font-family:var(--serif);font-size:clamp(28px,5vw,48px);font-weight:300;color:var(--text-bright);line-height:1.1;letter-spacing:-.02em}
+  h1 em{font-style:italic;color:var(--accent)}
+  .header-desc{margin-top:12px;color:var(--text-dim);font-size:12px;line-height:1.6;max-width:520px}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;margin-bottom:20px;position:relative;overflow:hidden}
+  .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent2),transparent);opacity:.3}
+  .panel-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent2);margin-bottom:20px;display:flex;align-items:center;gap:8px}
+  .panel-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+  /* Location cards */
+  #locationsList{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+  .loc-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;transition:border-color .2s}
+  .loc-card:hover{border-color:var(--text-dim)}
+  .loc-card-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .loc-badge{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--bg);border-radius:2px;padding:2px 7px;flex-shrink:0}
+  .loc-name-preview{font-size:12px;color:var(--text-bright);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .loc-remove{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:2px;transition:color .15s,background .15s}
+  .loc-remove:hover{color:var(--danger);background:rgba(255,90,110,.08)}
+  .loc-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}
+  .form-group{display:flex;flex-direction:column;gap:6px}
+  label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim)}
+  input[type=text],input[type=number],input[type=date]{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-bright);font-family:var(--mono);font-size:13px;padding:10px 14px;outline:none;transition:border-color .2s,box-shadow .2s;width:100%;color-scheme:dark}
+  input:focus{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(58,143,255,.12)}
+  .btn-add-loc{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1px dashed var(--border);color:var(--text-dim);border-radius:var(--radius);padding:10px 20px;cursor:pointer;transition:border-color .2s,color .2s;display:inline-flex;align-items:center;gap:8px}
+  .btn-add-loc:hover{border-color:var(--accent2);color:var(--accent2)}
+
+  /* Input method tabs */
+  .input-tabs{display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;width:fit-content}
+  .input-tab{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:none;color:var(--text-dim);padding:9px 18px;cursor:pointer;transition:background .2s,color .2s;border-right:1px solid var(--border)}
+  .input-tab:last-child{border-right:none}
+  .input-tab:hover{color:var(--text-bright)}
+  .input-tab.active{background:var(--surface2);color:var(--accent2)}
+  .tab-pane{display:none}.tab-pane.active{display:block}
+
+  /* Import zone */
+  .import-zone{border:1px dashed var(--border);border-radius:var(--radius);padding:24px;text-align:center;transition:border-color .2s,background .2s}
+  .import-zone.dragover{border-color:var(--accent2);background:rgba(58,143,255,.05)}
+  .import-zone-icon{font-size:28px;margin-bottom:10px;opacity:.5}
+  .import-zone-text{font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.6}
+  .import-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center}
+  .btn-template{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:var(--radius);padding:9px 16px;cursor:pointer;transition:background .2s,box-shadow .2s;display:inline-flex;align-items:center;gap:7px}
+  .btn-template:hover{background:rgba(74,240,176,.08);box-shadow:0 0 12px rgba(74,240,176,.15)}
+  .btn-upload-label{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:1px solid var(--accent2);color:var(--accent2);border-radius:var(--radius);padding:9px 16px;cursor:pointer;transition:background .2s;display:inline-flex;align-items:center;gap:7px}
+  .btn-upload-label:hover{background:rgba(58,143,255,.08)}
+  #uploadInput{display:none}
+  .import-status{margin-top:14px;font-size:11px;padding:8px 12px;border-radius:var(--radius);display:none}
+  .import-status.ok{display:block;background:rgba(74,240,176,.08);border:1px solid rgba(74,240,176,.2);color:var(--success)}
+  .import-status.err{display:block;background:rgba(255,90,110,.08);border:1px solid rgba(255,90,110,.2);color:var(--danger)}
+
+  /* Date range */
+  .date-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+  /* Type toggles */
+  .type-row{display:flex;gap:12px;flex-wrap:wrap}
+  .type-toggle{display:flex;align-items:center;gap:10px;cursor:pointer;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 18px;transition:border-color .2s,background .2s;user-select:none}
+  .type-toggle:hover{border-color:var(--text-dim)}
+  .type-toggle input[type=checkbox]{display:none}
+  .type-toggle.active{border-color:var(--accent);background:rgba(74,240,176,.06);color:var(--accent)}
+  .type-indicator{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;transition:background .2s}
+  .type-toggle.active .type-indicator{background:var(--accent)}
+
+  /* Metrics */
+  .metrics-sections{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .metrics-group{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  .metrics-group.disabled{opacity:.3;pointer-events:none}
+  .metrics-group-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3);flex-shrink:0}
+  .dot.blue{background:var(--accent2)}
+  .metric-item{display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;transition:color .15s}
+  .metric-item:hover{color:var(--text-bright)}
+  .metric-item input[type=checkbox]{display:none}
+  .check-box{width:14px;height:14px;border:1px solid var(--border);border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+  .metric-item.checked .check-box{border-color:var(--accent);background:var(--accent)}
+  .check-box::after{content:'✓';font-size:9px;color:var(--bg);opacity:0;transition:opacity .15s}
+  .metric-item.checked .check-box::after{opacity:1}
+  .metric-name{font-size:12px;color:var(--text-dim);transition:color .15s}
+  .metric-item.checked .metric-name{color:var(--text-bright)}
+  .select-all-row{display:flex;align-items:center;gap:8px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--border);cursor:pointer;color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .select-all-row:hover{color:var(--text-bright)}
+
+  /* Actions */
+  .actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .btn{font-family:var(--mono);font-size:12px;letter-spacing:.08em;border:none;border-radius:var(--radius);cursor:pointer;padding:12px 24px;transition:all .2s;display:inline-flex;align-items:center;gap:8px;text-transform:uppercase}
+  .btn-primary{background:var(--accent);color:var(--bg);font-weight:500}
+  .btn-primary:hover{background:#6af8c0;box-shadow:0 0 20px rgba(74,240,176,.25)}
+  .btn-primary:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+  .btn-export{background:transparent;border:1px solid var(--accent3);color:var(--accent3)}
+  .btn-export:hover{background:rgba(240,184,74,.08);box-shadow:0 0 16px rgba(240,184,74,.15)}
+  .btn-export:disabled{opacity:.3;cursor:not-allowed}
+  .spinner{display:none;align-items:center;gap:10px;color:var(--text-dim);font-size:12px}
+  .spinner.visible{display:flex}
+  .spin-ring{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .msg{padding:12px 16px;border-radius:var(--radius);font-size:12px;margin-top:16px;display:none}
+  .msg.visible{display:block}
+  .msg-error{background:rgba(255,90,110,.08);border:1px solid rgba(255,90,110,.3);color:var(--danger)}
+  .msg-success{background:rgba(74,240,176,.08);border:1px solid rgba(74,240,176,.3);color:var(--success)}
+
+  /* Progress */
+  .progress-bar-wrap{margin-top:14px;display:none}
+  .progress-bar-wrap.visible{display:block}
+  .progress-label{font-size:11px;color:var(--text-dim);margin-bottom:6px}
+  .progress-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+  .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s;width:0%}
+
+  /* Results */
+  #results{margin-top:32px}
+  .results-location-block{margin-bottom:40px}
+  .results-loc-header{display:flex;align-items:baseline;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--border)}
+  .results-loc-name{font-family:var(--serif);font-size:22px;font-weight:300}
+  .results-loc-coords{font-size:11px;color:var(--text-dim)}
+  .results-section{margin-bottom:24px}
+  .results-header{display:flex;align-items:baseline;gap:16px;margin-bottom:12px}
+  .results-title{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2)}
+  .results-count{font-size:11px;color:var(--text-dim)}
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  thead th{background:var(--surface2);color:var(--text-dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:10px 14px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);position:sticky;top:0}
+  tbody tr{border-bottom:1px solid rgba(31,45,66,.5);transition:background .1s}
+  tbody tr:hover{background:var(--surface2)}
+  tbody tr:last-child{border-bottom:none}
+  tbody td{padding:8px 14px;color:var(--text);white-space:nowrap}
+  tbody td:first-child{color:var(--accent2);font-size:11px}
+  .table-note{padding:10px 14px;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border)}
+
+  @media(max-width:640px){.loc-grid{grid-template-columns:1fr}.metrics-sections{grid-template-columns:1fr}.date-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -239,462 +257,441 @@
   <header>
     <div class="header-tag">Open-Meteo Archive API</div>
     <h1>Historical <em>Weather</em><br>Data Explorer</h1>
-    <p class="header-desc">Retrieve and export archived climate data for any global location and time range. Supports hourly and daily metrics with one-click Excel export.</p>
+    <p class="header-desc">Fetch archived climate data for multiple locations simultaneously. Each location exports as a dedicated sheet in the Excel file.</p>
   </header>
 
-  <!-- Step 1: Location & Dates -->
+  <!-- 01 Locations -->
   <div class="panel">
-    <div class="panel-label">01 — Location &amp; Date Range</div>
-    <div class="form-grid">
-      <div class="form-group">
-        <label>Latitude</label>
-        <input type="number" id="lat" step="any" placeholder="e.g. 10.8" />
-      </div>
-      <div class="form-group">
-        <label>Longitude</label>
-        <input type="number" id="lon" step="any" placeholder="e.g. 106.6" />
-      </div>
-      <div class="form-group">
-        <label>Start Date</label>
-        <input type="date" id="startDate" />
-      </div>
-      <div class="form-group">
-        <label>End Date</label>
-        <input type="date" id="endDate" />
+    <div class="panel-label">01 — Locations</div>
+
+    <!-- Method tabs -->
+    <div class="input-tabs">
+      <button class="input-tab active" onclick="switchTab('manual')">✎ Manual Input</button>
+      <button class="input-tab" onclick="switchTab('import')">↑ Import from Excel</button>
+    </div>
+
+    <!-- Tab: Manual -->
+    <div class="tab-pane active" id="tab-manual">
+      <div id="locationsList"></div>
+      <button class="btn-add-loc" onclick="addLocation()">＋ Add Another Location</button>
+    </div>
+
+    <!-- Tab: Import -->
+    <div class="tab-pane" id="tab-import">
+      <div class="import-zone" id="importZone">
+        <div class="import-zone-icon">⬇</div>
+        <div class="import-zone-text">
+          Download the template, fill in your locations in Excel,<br>then upload the file here. Drag &amp; drop also supported.
+        </div>
+        <div class="import-actions">
+          <button class="btn-template" onclick="downloadTemplate()">↓ Download Template (.xlsx)</button>
+          <label class="btn-upload-label" for="uploadInput">↑ Upload Filled Template</label>
+          <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="handleUpload(this)">
+        </div>
+        <div class="import-status" id="importStatus"></div>
       </div>
     </div>
   </div>
 
-  <!-- Step 2: Data Type -->
+  <!-- 02 Date Range -->
   <div class="panel">
-    <div class="panel-label">02 — Data Type</div>
+    <div class="panel-label">02 — Date Range <span style="font-size:10px;color:var(--text-dim);text-transform:none;letter-spacing:0">(shared across all locations)</span></div>
+    <div class="date-grid">
+      <div class="form-group"><label>Start Date</label><input type="date" id="startDate"/></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="endDate"/></div>
+    </div>
+  </div>
+
+  <!-- 03 Data Type -->
+  <div class="panel">
+    <div class="panel-label">03 — Data Type</div>
     <div class="type-row">
       <label class="type-toggle active" id="toggleHourly">
         <input type="checkbox" id="chkHourly" checked>
-        <div class="type-indicator"></div>
-        <span>Hourly Data</span>
+        <div class="type-indicator"></div><span>Hourly Data</span>
       </label>
       <label class="type-toggle" id="toggleDaily">
         <input type="checkbox" id="chkDaily">
-        <div class="type-indicator"></div>
-        <span>Daily Data</span>
+        <div class="type-indicator"></div><span>Daily Data</span>
       </label>
     </div>
   </div>
 
-  <!-- Step 3: Metrics -->
+  <!-- 04 Metrics -->
   <div class="panel">
-    <div class="panel-label">03 — Metrics Selection</div>
+    <div class="panel-label">04 — Metrics Selection</div>
     <div class="metrics-sections">
       <div class="metrics-group" id="hourlyGroup">
-        <div class="metrics-group-title">
-          <span class="dot"></span> Hourly Metrics
-        </div>
-        <div class="select-all-row" onclick="selectAll('hourly')">
-          <div class="check-box" id="allHourlyBox"></div>
-          Select All
-        </div>
+        <div class="metrics-group-title"><span class="dot"></span> Hourly Metrics</div>
+        <div class="select-all-row" onclick="selectAll('hourly')"><div class="check-box" id="allHourlyBox"></div> Select All</div>
         <div id="hourlyMetrics"></div>
       </div>
       <div class="metrics-group disabled" id="dailyGroup">
-        <div class="metrics-group-title">
-          <span class="dot blue"></span> Daily Metrics
-        </div>
-        <div class="select-all-row" onclick="selectAll('daily')">
-          <div class="check-box" id="allDailyBox"></div>
-          Select All
-        </div>
+        <div class="metrics-group-title"><span class="dot blue"></span> Daily Metrics</div>
+        <div class="select-all-row" onclick="selectAll('daily')"><div class="check-box" id="allDailyBox"></div> Select All</div>
         <div id="dailyMetrics"></div>
       </div>
     </div>
   </div>
 
-  <!-- Step 4: Actions -->
+  <!-- 05 Actions -->
   <div class="panel">
-    <div class="panel-label">04 — Fetch &amp; Export</div>
+    <div class="panel-label">05 — Fetch &amp; Export</div>
     <div class="actions">
-      <button class="btn btn-primary" id="fetchBtn" onclick="fetchData()">⟶ Fetch Weather Data</button>
+      <button class="btn btn-primary" id="fetchBtn" onclick="fetchAllData()">⟶ Fetch All Locations</button>
       <button class="btn btn-export" id="exportBtn" onclick="exportExcel()" disabled>↓ Export to Excel</button>
-      <div class="spinner" id="spinner">
-        <div class="spin-ring"></div>
-        Fetching archive data…
-      </div>
+      <div class="spinner" id="spinner"><div class="spin-ring"></div><span id="spinnerText">Fetching…</span></div>
+    </div>
+    <div class="progress-bar-wrap" id="progressWrap">
+      <div class="progress-label" id="progressLabel"></div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
     </div>
     <div class="msg msg-error" id="errMsg"></div>
     <div class="msg msg-success" id="successMsg"></div>
-    <div class="api-url-display" id="apiUrlDisplay">
-      <span class="lbl">API Request URL:</span><br>
-      <span id="apiUrlText"></span>
-    </div>
   </div>
 
   <div id="results"></div>
-
 </div>
 
 <script>
-// ── Metric definitions ────────────────────────────────────────────────────────
 const HOURLY_METRICS = [
-  { id: 'temperature_2m',       label: 'Temperature 2m (°C)' },
-  { id: 'relative_humidity_2m', label: 'Relative Humidity 2m (%)' },
-  { id: 'precipitation',        label: 'Precipitation (mm)' },
-  { id: 'rain',                 label: 'Rain (mm)' },
-  { id: 'snowfall',             label: 'Snowfall (cm)' },
-  { id: 'windspeed_10m',        label: 'Wind Speed 10m (km/h)' },
-  { id: 'winddirection_10m',    label: 'Wind Direction 10m (°)' },
-  { id: 'cloudcover',           label: 'Cloud Cover (%)' },
-  { id: 'surface_pressure',     label: 'Surface Pressure (hPa)' },
+  {id:'temperature_2m',      label:'Temperature 2m (°C)'},
+  {id:'relative_humidity_2m',label:'Relative Humidity 2m (%)'},
+  {id:'precipitation',       label:'Precipitation (mm)'},
+  {id:'rain',                label:'Rain (mm)'},
+  {id:'snowfall',            label:'Snowfall (cm)'},
+  {id:'windspeed_10m',       label:'Wind Speed 10m (km/h)'},
+  {id:'winddirection_10m',   label:'Wind Direction 10m (°)'},
+  {id:'cloudcover',          label:'Cloud Cover (%)'},
+  {id:'surface_pressure',    label:'Surface Pressure (hPa)'},
 ];
-
 const DAILY_METRICS = [
-  { id: 'temperature_2m_max',  label: 'Temp Max (°C)' },
-  { id: 'temperature_2m_min',  label: 'Temp Min (°C)' },
-  { id: 'precipitation_sum',   label: 'Precipitation Sum (mm)' },
-  { id: 'rain_sum',            label: 'Rain Sum (mm)' },
-  { id: 'snowfall_sum',        label: 'Snowfall Sum (cm)' },
-  { id: 'windspeed_10m_max',   label: 'Wind Speed Max (km/h)' },
-  { id: 'sunrise',             label: 'Sunrise' },
-  { id: 'sunset',              label: 'Sunset' },
+  {id:'temperature_2m_max', label:'Temp Max (°C)'},
+  {id:'temperature_2m_min', label:'Temp Min (°C)'},
+  {id:'precipitation_sum',  label:'Precipitation Sum (mm)'},
+  {id:'rain_sum',           label:'Rain Sum (mm)'},
+  {id:'snowfall_sum',       label:'Snowfall Sum (cm)'},
+  {id:'windspeed_10m_max',  label:'Wind Speed Max (km/h)'},
+  {id:'sunrise',            label:'Sunrise'},
+  {id:'sunset',             label:'Sunset'},
 ];
+const LOC_COLORS = ['#4af0b0','#3a8fff','#f0b84a','#c084fc','#f87171','#34d399','#fb923c'];
 
-let weatherData = null;
+let locCounter = 0;
+let allResults = [];
 
-// ── Build metric checkboxes ───────────────────────────────────────────────────
+// ── Location cards ────────────────────────────────────────────────────────────
+function addLocation(preset={}) {
+  const id = ++locCounter;
+  const color = LOC_COLORS[(id-1) % LOC_COLORS.length];
+  const card = document.createElement('div');
+  card.className = 'loc-card';
+  card.id = 'loc-card-' + id;
+  card.style.borderLeft = '3px solid ' + color;
+  card.innerHTML = `
+    <div class="loc-card-header">
+      <span class="loc-badge" style="background:${color}">Location ${id}</span>
+      <span class="loc-name-preview" id="loc-preview-${id}">${preset.name||'Unnamed'}</span>
+      <button class="loc-remove" onclick="removeLocation(${id})" title="Remove location">✕</button>
+    </div>
+    <div class="loc-grid">
+      <div class="form-group">
+        <label>Location Name</label>
+        <input type="text" id="loc-name-${id}" placeholder="e.g. Ho Chi Minh City" value="${preset.name||''}"
+          oninput="document.getElementById('loc-preview-${id}').textContent=this.value||'Unnamed'">
+      </div>
+      <div class="form-group">
+        <label>Latitude</label>
+        <input type="number" id="loc-lat-${id}" step="any" placeholder="e.g. 10.8" value="${preset.lat||''}">
+      </div>
+      <div class="form-group">
+        <label>Longitude</label>
+        <input type="number" id="loc-lon-${id}" step="any" placeholder="e.g. 106.6" value="${preset.lon||''}">
+      </div>
+    </div>`;
+  document.getElementById('locationsList').appendChild(card);
+  updateRemoveButtons();
+}
+
+function removeLocation(id) {
+  const card = document.getElementById('loc-card-' + id);
+  if (card) card.remove();
+  updateRemoveButtons();
+}
+
+function updateRemoveButtons() {
+  const cards = document.querySelectorAll('.loc-card');
+  cards.forEach(c => { c.querySelector('.loc-remove').style.display = cards.length <= 1 ? 'none' : ''; });
+}
+
+function getLocations() {
+  return Array.from(document.querySelectorAll('.loc-card')).map(card => {
+    const id = card.id.replace('loc-card-','');
+    return {
+      id,
+      name: document.getElementById('loc-name-'+id).value.trim() || ('Location '+id),
+      lat:  document.getElementById('loc-lat-'+id).value.trim(),
+      lon:  document.getElementById('loc-lon-'+id).value.trim(),
+    };
+  });
+}
+
+// ── Metric checkboxes ─────────────────────────────────────────────────────────
 function buildMetricList(containerId, metrics, prefix) {
-  const container = document.getElementById(containerId);
+  const el = document.getElementById(containerId);
   metrics.forEach(m => {
     const div = document.createElement('div');
     div.className = 'metric-item';
     div.id = `item_${prefix}_${m.id}`;
-    div.innerHTML = `
-      <input type="checkbox" id="${prefix}_${m.id}" value="${m.id}">
-      <div class="check-box"></div>
-      <span class="metric-name">${m.label}</span>
-    `;
-    div.addEventListener('click', () => toggleMetric(div, `${prefix}_${m.id}`, prefix === 'hourly' ? 'hourly' : 'daily'));
-    container.appendChild(div);
+    div.innerHTML = `<input type="checkbox" id="${prefix}_${m.id}"><div class="check-box"></div><span class="metric-name">${m.label}</span>`;
+    div.addEventListener('click', () => {
+      const chk = document.getElementById(`${prefix}_${m.id}`);
+      chk.checked = !chk.checked;
+      div.classList.toggle('checked', chk.checked);
+      updateSelectAllBox(prefix);
+    });
+    el.appendChild(div);
   });
 }
-
 buildMetricList('hourlyMetrics', HOURLY_METRICS, 'hourly');
-buildMetricList('dailyMetrics', DAILY_METRICS, 'daily');
-
-// Default: select first 3 hourly metrics
-['temperature_2m', 'relative_humidity_2m', 'precipitation'].forEach(id => {
-  document.getElementById(`item_hourly_${id}`).classList.add('checked');
-  document.getElementById(`hourly_${id}`).checked = true;
+buildMetricList('dailyMetrics',  DAILY_METRICS,  'daily');
+['temperature_2m','relative_humidity_2m','precipitation'].forEach(id => {
+  document.getElementById('hourly_'+id).checked = true;
+  document.getElementById('item_hourly_'+id).classList.add('checked');
 });
 
-// Default dates: last 30 days
-const today = new Date();
-const past = new Date(today); past.setDate(today.getDate() - 30);
-document.getElementById('endDate').value = fmtDate(today);
-document.getElementById('startDate').value = fmtDate(past);
+function selectAll(type) {
+  const metrics = type==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
+  const allOn = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
+  metrics.forEach(m => {
+    document.getElementById(`${type}_${m.id}`).checked = !allOn;
+    document.getElementById(`item_${type}_${m.id}`).classList.toggle('checked', !allOn);
+  });
+  updateSelectAllBox(type);
+}
+function updateSelectAllBox(type) {
+  const metrics = type==='hourly' ? HOURLY_METRICS : DAILY_METRICS;
+  const box = document.getElementById(type==='hourly'?'allHourlyBox':'allDailyBox');
+  const allOn = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
+  box.style.background = allOn ? 'var(--accent)' : '';
+  box.style.borderColor = allOn ? 'var(--accent)' : '';
+  box.innerHTML = allOn ? '<span style="font-size:9px;color:var(--bg)">✓</span>' : '';
+}
 
-// Default coordinates: Ho Chi Minh City
-document.getElementById('lat').value = '10.8';
-document.getElementById('lon').value = '106.6';
+document.getElementById('toggleHourly').addEventListener('click', function(e){
+  if(e.target.tagName==='INPUT') return;
+  const chk = document.getElementById('chkHourly'); chk.checked=!chk.checked;
+  this.classList.toggle('active',chk.checked);
+  document.getElementById('hourlyGroup').classList.toggle('disabled',!chk.checked);
+});
+document.getElementById('toggleDaily').addEventListener('click', function(e){
+  if(e.target.tagName==='INPUT') return;
+  const chk = document.getElementById('chkDaily'); chk.checked=!chk.checked;
+  this.classList.toggle('active',chk.checked);
+  document.getElementById('dailyGroup').classList.toggle('disabled',!chk.checked);
+});
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function fmtDate(d) { return d.toISOString().slice(0, 10); }
+// ── Init defaults ─────────────────────────────────────────────────────────────
+const today = new Date(), past = new Date(today);
+past.setDate(today.getDate()-30);
+document.getElementById('endDate').value   = today.toISOString().slice(0,10);
+document.getElementById('startDate').value = past.toISOString().slice(0,10);
+addLocation({name:'Ho Chi Minh City', lat:'10.8', lon:'106.6'});
 
+// ── Messages ──────────────────────────────────────────────────────────────────
 function showError(msg) {
-  const el = document.getElementById('errMsg');
-  el.textContent = '⚠  ' + msg;
-  el.classList.add('visible');
+  const el=document.getElementById('errMsg'); el.textContent='⚠  '+msg; el.classList.add('visible');
   document.getElementById('successMsg').classList.remove('visible');
 }
-
 function showSuccess(msg) {
-  const el = document.getElementById('successMsg');
-  el.textContent = '✓  ' + msg;
-  el.classList.add('visible');
+  const el=document.getElementById('successMsg'); el.textContent='✓  '+msg; el.classList.add('visible');
   document.getElementById('errMsg').classList.remove('visible');
 }
-
 function hideMessages() {
   document.getElementById('errMsg').classList.remove('visible');
   document.getElementById('successMsg').classList.remove('visible');
 }
 
-// ── Toggle logic ──────────────────────────────────────────────────────────────
-function toggleMetric(div, checkId, type) {
-  const chk = document.getElementById(checkId);
-  chk.checked = !chk.checked;
-  div.classList.toggle('checked', chk.checked);
-  updateSelectAllBox(type);
-}
-
-function selectAll(type) {
-  const metrics = type === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
-  const allChecked = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
-  metrics.forEach(m => {
-    const chk = document.getElementById(`${type}_${m.id}`);
-    const div = document.getElementById(`item_${type}_${m.id}`);
-    chk.checked = !allChecked;
-    div.classList.toggle('checked', !allChecked);
-  });
-  updateSelectAllBox(type);
-}
-
-function updateSelectAllBox(type) {
-  const metrics = type === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
-  const boxId = type === 'hourly' ? 'allHourlyBox' : 'allDailyBox';
-  const allChecked = metrics.every(m => document.getElementById(`${type}_${m.id}`).checked);
-  const box = document.getElementById(boxId);
-  if (allChecked) {
-    box.style.background = 'var(--accent)';
-    box.style.borderColor = 'var(--accent)';
-    box.innerHTML = '<span style="font-size:9px;color:var(--bg)">✓</span>';
-  } else {
-    box.style.background = '';
-    box.style.borderColor = '';
-    box.innerHTML = '';
-  }
-}
-
-// Data type toggles
-document.getElementById('toggleHourly').addEventListener('click', function(e) {
-  if (e.target.tagName === 'INPUT') return;
-  const chk = document.getElementById('chkHourly');
-  chk.checked = !chk.checked;
-  this.classList.toggle('active', chk.checked);
-  document.getElementById('hourlyGroup').classList.toggle('disabled', !chk.checked);
-});
-
-document.getElementById('toggleDaily').addEventListener('click', function(e) {
-  if (e.target.tagName === 'INPUT') return;
-  const chk = document.getElementById('chkDaily');
-  chk.checked = !chk.checked;
-  this.classList.toggle('active', chk.checked);
-  document.getElementById('dailyGroup').classList.toggle('disabled', !chk.checked);
-});
-
 // ── Validation ────────────────────────────────────────────────────────────────
 function validate() {
-  const lat = document.getElementById('lat').value.trim();
-  const lon = document.getElementById('lon').value.trim();
+  const locs = getLocations();
   const start = document.getElementById('startDate').value;
-  const end = document.getElementById('endDate').value;
-  const useHourly = document.getElementById('chkHourly').checked;
-  const useDaily = document.getElementById('chkDaily').checked;
+  const end   = document.getElementById('endDate').value;
+  const useH  = document.getElementById('chkHourly').checked;
+  const useD  = document.getElementById('chkDaily').checked;
 
-  if (lat === '') { showError('Latitude is required.'); return false; }
-  if (lon === '') { showError('Longitude is required.'); return false; }
-  if (isNaN(parseFloat(lat)) || parseFloat(lat) < -90 || parseFloat(lat) > 90) {
-    showError('Latitude must be a number between -90 and 90.'); return false;
-  }
-  if (isNaN(parseFloat(lon)) || parseFloat(lon) < -180 || parseFloat(lon) > 180) {
-    showError('Longitude must be a number between -180 and 180.'); return false;
+  if (!locs.length) { showError('Add at least one location.'); return false; }
+  for (const loc of locs) {
+    if (!loc.lat) { showError(`"${loc.name}": Latitude is required.`); return false; }
+    if (!loc.lon) { showError(`"${loc.name}": Longitude is required.`); return false; }
+    if (isNaN(+loc.lat)||+loc.lat<-90||+loc.lat>90)   { showError(`"${loc.name}": Latitude must be -90 to 90.`); return false; }
+    if (isNaN(+loc.lon)||+loc.lon<-180||+loc.lon>180) { showError(`"${loc.name}": Longitude must be -180 to 180.`); return false; }
   }
   if (!start) { showError('Start date is required.'); return false; }
-  if (!end) { showError('End date is required.'); return false; }
-  if (start > end) { showError('Start date must be before or equal to end date.'); return false; }
-  if (!useHourly && !useDaily) { showError('Select at least one data type (Hourly or Daily).'); return false; }
-  if (useHourly) {
-    const sel = HOURLY_METRICS.filter(m => document.getElementById(`hourly_${m.id}`).checked);
-    if (!sel.length) { showError('Select at least one Hourly metric.'); return false; }
-  }
-  if (useDaily) {
-    const sel = DAILY_METRICS.filter(m => document.getElementById(`daily_${m.id}`).checked);
-    if (!sel.length) { showError('Select at least one Daily metric.'); return false; }
-  }
+  if (!end)   { showError('End date is required.'); return false; }
+  if (start>end) { showError('Start date must be before or equal to end date.'); return false; }
+  if (!useH&&!useD) { showError('Select at least one data type.'); return false; }
+  if (useH && !HOURLY_METRICS.some(m=>document.getElementById('hourly_'+m.id).checked)) { showError('Select at least one Hourly metric.'); return false; }
+  if (useD && !DAILY_METRICS.some(m=>document.getElementById('daily_'+m.id).checked))  { showError('Select at least one Daily metric.'); return false; }
   return true;
 }
 
-// ── Fetch data ────────────────────────────────────────────────────────────────
-async function fetchData() {
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+async function fetchAllData() {
   hideMessages();
   if (!validate()) return;
 
-  const lat = document.getElementById('lat').value.trim();
-  const lon = document.getElementById('lon').value.trim();
+  const locs  = getLocations();
   const start = document.getElementById('startDate').value;
-  const end = document.getElementById('endDate').value;
-  const useHourly = document.getElementById('chkHourly').checked;
-  const useDaily = document.getElementById('chkDaily').checked;
+  const end   = document.getElementById('endDate').value;
+  const useH  = document.getElementById('chkHourly').checked;
+  const useD  = document.getElementById('chkDaily').checked;
+  const hMetrics = HOURLY_METRICS.filter(m=>document.getElementById('hourly_'+m.id).checked).map(m=>m.id);
+  const dMetrics = DAILY_METRICS.filter(m=>document.getElementById('daily_'+m.id).checked).map(m=>m.id);
 
-  // Build dynamic URL
-  const params = new URLSearchParams({ latitude: lat, longitude: lon, start_date: start, end_date: end, timezone: 'auto' });
-  if (useHourly) {
-    const m = HOURLY_METRICS.filter(x => document.getElementById(`hourly_${x.id}`).checked).map(x => x.id);
-    params.append('hourly', m.join(','));
-  }
-  if (useDaily) {
-    const m = DAILY_METRICS.filter(x => document.getElementById(`daily_${x.id}`).checked).map(x => x.id);
-    params.append('daily', m.join(','));
-  }
-
-  const url = `https://archive-api.open-meteo.com/v1/archive?${params.toString()}`;
-
-  // Show constructed URL
-  document.getElementById('apiUrlDisplay').style.display = 'block';
-  document.getElementById('apiUrlText').textContent = url;
-
-  // UI: loading
-  document.getElementById('spinner').classList.add('visible');
+  // Reset UI
   document.getElementById('fetchBtn').disabled = true;
   document.getElementById('exportBtn').disabled = true;
+  document.getElementById('spinner').classList.add('visible');
   document.getElementById('results').innerHTML = '';
-  weatherData = null;
+  document.getElementById('progressWrap').classList.add('visible');
+  document.getElementById('progressFill').style.width = '0%';
+  allResults = [];
 
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      let reason = `HTTP ${res.status}`;
-      try { const e = await res.json(); reason = e.reason || reason; } catch {}
-      throw new Error(reason);
+  const errors = [];
+
+  for (let i=0; i<locs.length; i++) {
+    const loc = locs[i];
+    document.getElementById('progressLabel').textContent = `Fetching ${i+1} / ${locs.length}: ${loc.name}`;
+    document.getElementById('spinnerText').textContent = loc.name + '…';
+    document.getElementById('progressFill').style.width = Math.round((i/locs.length)*100)+'%';
+
+    const params = new URLSearchParams({latitude:loc.lat, longitude:loc.lon, start_date:start, end_date:end, timezone:'auto'});
+    if (useH) params.append('hourly', hMetrics.join(','));
+    if (useD) params.append('daily',  dMetrics.join(','));
+
+    try {
+      const res = await fetch('https://archive-api.open-meteo.com/v1/archive?'+params.toString());
+      if (!res.ok) {
+        let r='HTTP '+res.status; try{const e=await res.json();r=e.reason||r;}catch{}
+        throw new Error(r);
+      }
+      const data = await res.json();
+      allResults.push({name:loc.name, lat:loc.lat, lon:loc.lon, data});
+    } catch(e) {
+      errors.push(`"${loc.name}": ${e.message}`);
     }
-    const data = await res.json();
+  }
 
-    // Store for export
-    weatherData = { data, lat, lon, start, end };
+  document.getElementById('progressFill').style.width = '100%';
+  document.getElementById('progressLabel').textContent = `Done — ${allResults.length}/${locs.length} locations fetched`;
+  document.getElementById('spinner').classList.remove('visible');
+  document.getElementById('fetchBtn').disabled = false;
 
-    renderResults(data);
+  if (allResults.length) {
+    renderAll();
     document.getElementById('exportBtn').disabled = false;
-
-    // Summary
-    const parts = [];
-    if (data.hourly && data.hourly.time) parts.push(`${data.hourly.time.length} hourly records`);
-    if (data.daily && data.daily.time) parts.push(`${data.daily.time.length} daily records`);
-    showSuccess('Data fetched successfully. ' + parts.join(' · '));
-
-  } catch (e) {
-    showError('API request failed: ' + e.message);
-  } finally {
-    document.getElementById('spinner').classList.remove('visible');
-    document.getElementById('fetchBtn').disabled = false;
+    const totalH = allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
+    const totalD = allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
+    const parts=[]; if(totalH) parts.push(totalH.toLocaleString()+' hourly'); if(totalD) parts.push(totalD.toLocaleString()+' daily');
+    if (errors.length) showError(`${errors.length} failed: ${errors.join('; ')}. Fetched: ${allResults.length} location(s).`);
+    else showSuccess(`${allResults.length} location(s) fetched — ${parts.join(' · ')} records`);
+  } else {
+    showError('All requests failed. '+errors.join(' | '));
+    document.getElementById('progressWrap').classList.remove('visible');
   }
 }
 
 // ── Render tables ─────────────────────────────────────────────────────────────
-function renderResults(data) {
+function renderAll() {
   const container = document.getElementById('results');
   container.innerHTML = '';
+  allResults.forEach((r,idx) => {
+    const color = LOC_COLORS[idx % LOC_COLORS.length];
+    const block = document.createElement('div');
+    block.className = 'results-location-block';
 
-  if (data.hourly && data.hourly.time && data.hourly.time.length > 0) {
-    container.appendChild(buildSection('Hourly Data', data.hourly, HOURLY_METRICS));
-  }
-  if (data.daily && data.daily.time && data.daily.time.length > 0) {
-    container.appendChild(buildSection('Daily Data', data.daily, DAILY_METRICS));
-  }
+    const hdr = document.createElement('div');
+    hdr.className = 'results-loc-header';
+    hdr.style.borderBottomColor = color;
+    hdr.innerHTML = `<div class="results-loc-name" style="color:${color}">${r.name}</div><div class="results-loc-coords">${r.lat}°N, ${r.lon}°E</div>`;
+    block.appendChild(hdr);
+
+    if (r.data.hourly?.time?.length) block.appendChild(buildSection('Hourly Data', r.data.hourly, HOURLY_METRICS));
+    if (r.data.daily?.time?.length)  block.appendChild(buildSection('Daily Data',  r.data.daily,  DAILY_METRICS));
+    container.appendChild(block);
+  });
 }
 
 function buildSection(title, dataset, metricDefs) {
-  // Extract metric keys (everything except 'time')
-  const keys = Object.keys(dataset).filter(k => k !== 'time');
-  const times = dataset.time;
-  const totalRows = times.length;
-  const DISPLAY_LIMIT = 500;
+  const keys = Object.keys(dataset).filter(k=>k!=='time');
+  const total = dataset.time.length;
+  const LIMIT = 200;
 
-  const section = document.createElement('div');
-  section.className = 'results-section';
+  const section = document.createElement('div'); section.className='results-section';
+  const hdr = document.createElement('div'); hdr.className='results-header';
+  hdr.innerHTML=`<div class="results-title">${title}</div><div class="results-count">${total.toLocaleString()} records · ${keys.length} metrics</div>`;
+  section.appendChild(hdr);
 
-  // Header
-  const header = document.createElement('div');
-  header.className = 'results-header';
-  header.innerHTML = `
-    <div class="results-title">${title}</div>
-    <div class="results-count">${totalRows} records &middot; ${keys.length} metric${keys.length !== 1 ? 's' : ''}</div>
-  `;
-  section.appendChild(header);
-
-  const wrap = document.createElement('div');
-  wrap.className = 'table-wrap';
-
+  const wrap = document.createElement('div'); wrap.className='table-wrap';
   const table = document.createElement('table');
 
-  // thead
-  const thead = document.createElement('thead');
-  const htr = document.createElement('tr');
-  ['Time / Date', ...keys.map(k => {
-    const def = metricDefs.find(m => m.id === k);
-    return def ? def.label : k;
-  })].forEach(h => {
-    const th = document.createElement('th');
-    th.textContent = h;
-    htr.appendChild(th);
+  const thead=document.createElement('thead'), htr=document.createElement('tr');
+  ['Time / Date',...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?d.label:k;})].forEach(h=>{
+    const th=document.createElement('th');th.textContent=h;htr.appendChild(th);
   });
-  thead.appendChild(htr);
-  table.appendChild(thead);
+  thead.appendChild(htr);table.appendChild(thead);
 
-  // tbody
-  const tbody = document.createElement('tbody');
-  const showCount = Math.min(totalRows, DISPLAY_LIMIT);
-  for (let i = 0; i < showCount; i++) {
-    const tr = document.createElement('tr');
-    // time cell
-    const tdTime = document.createElement('td');
-    tdTime.textContent = times[i];
-    tr.appendChild(tdTime);
-    // metric cells
-    keys.forEach(k => {
-      const td = document.createElement('td');
-      const v = dataset[k][i];
-      td.textContent = (v === null || v === undefined) ? '—' : v;
-      tr.appendChild(td);
-    });
+  const tbody=document.createElement('tbody');
+  for(let i=0;i<Math.min(total,LIMIT);i++){
+    const tr=document.createElement('tr');
+    const td0=document.createElement('td');td0.textContent=dataset.time[i];tr.appendChild(td0);
+    keys.forEach(k=>{const td=document.createElement('td');const v=dataset[k][i];td.textContent=(v===null||v===undefined)?'—':v;tr.appendChild(td);});
     tbody.appendChild(tr);
   }
-  table.appendChild(tbody);
-  wrap.appendChild(table);
+  table.appendChild(tbody);wrap.appendChild(table);
 
-  // Truncation notice
-  if (totalRows > DISPLAY_LIMIT) {
-    const note = document.createElement('div');
-    note.className = 'table-note';
-    note.textContent = `Displaying ${DISPLAY_LIMIT.toLocaleString()} of ${totalRows.toLocaleString()} rows. All records are included in the Excel export.`;
+  if (total>LIMIT) {
+    const note=document.createElement('div');note.className='table-note';
+    note.textContent=`Showing ${LIMIT} of ${total.toLocaleString()} rows. All records are included in Excel export.`;
     wrap.appendChild(note);
   }
-
   section.appendChild(wrap);
   return section;
 }
 
-// ── Export to Excel ───────────────────────────────────────────────────────────
+// ── Export ────────────────────────────────────────────────────────────────────
 function exportExcel() {
-  if (!weatherData) { showError('No data available to export. Fetch data first.'); return; }
-
-  const { data, lat, lon, start, end } = weatherData;
+  if (!allResults.length) { showError('No data to export.'); return; }
   const wb = XLSX.utils.book_new();
-  let hasSheet = false;
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
 
-  if (data.hourly && data.hourly.time) {
-    const ws = datasetToSheet(data.hourly, HOURLY_METRICS);
-    XLSX.utils.book_append_sheet(wb, ws, 'hourly_data');
-    hasSheet = true;
-  }
+  allResults.forEach(r => {
+    // Sheet name: sanitize, max 29 chars + _H/_D suffix = 31
+    const safe = r.name.replace(/[:\\/\?\*\[\]]/g,'').trim().slice(0,27);
+    if (r.data.hourly?.time?.length) {
+      XLSX.utils.book_append_sheet(wb, makeSheet(r.data.hourly, HOURLY_METRICS, r), (safe+'_H').slice(0,31));
+    }
+    if (r.data.daily?.time?.length) {
+      XLSX.utils.book_append_sheet(wb, makeSheet(r.data.daily, DAILY_METRICS, r), (safe+'_D').slice(0,31));
+    }
+  });
 
-  if (data.daily && data.daily.time) {
-    const ws = datasetToSheet(data.daily, DAILY_METRICS);
-    XLSX.utils.book_append_sheet(wb, ws, 'daily_data');
-    hasSheet = true;
-  }
-
-  if (!hasSheet) { showError('No data to export.'); return; }
-
-  // File name: weather_lat_lon_startDate_endDate.xlsx
-  const filename = `weather_${lat}_${lon}_${start}_${end}.xlsx`;
+  const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
   XLSX.writeFile(wb, filename);
-  showSuccess(`Exported successfully: ${filename}`);
+  showSuccess(`Exported: ${filename} · ${wb.SheetNames.length} sheets`);
 }
 
-function datasetToSheet(dataset, metricDefs) {
-  const keys = Object.keys(dataset).filter(k => k !== 'time');
-  // Header row
-  const headers = ['Time / Date', ...keys.map(k => {
-    const def = metricDefs.find(m => m.id === k);
-    return def ? def.label : k;
-  })];
-  // Data rows
-  const rows = dataset.time.map((t, i) => {
-    return [t, ...keys.map(k => {
-      const v = dataset[k][i];
-      return (v === null || v === undefined) ? '' : v;
-    })];
-  });
-  // Convert to worksheet
-  return XLSX.utils.aoa_to_sheet([headers, ...rows]);
+function makeSheet(dataset, metricDefs, loc) {
+  const keys = Object.keys(dataset).filter(k=>k!=='time');
+  const headers = ['Time / Date', ...keys.map(k=>{const d=metricDefs.find(m=>m.id===k);return d?d.label:k;})];
+  const rows = dataset.time.map((t,i)=>[t,...keys.map(k=>{const v=dataset[k][i];return(v===null||v===undefined)?'':v;})]);
+
+  // Info rows at top for traceability
+  const infoRow1 = ['Location:', loc.name, '', 'Latitude:', loc.lat, 'Longitude:', loc.lon];
+  const infoRow2 = [];
+  return XLSX.utils.aoa_to_sheet([infoRow1, infoRow2, headers, ...rows]);
 }
 </script>
 </body>
