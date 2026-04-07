@@ -140,7 +140,7 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); font-si
 }
 .nav-item:hover { color:rgba(255,255,255,0.9); background:rgba(255,255,255,0.05); }
 .nav-item.active { color:#fff; border-left-color:var(--blue); background:rgba(59,130,246,0.12); }
-.nav-item.locked { opacity:.35; cursor:not-allowed; pointer-events:none; }
+.nav-item.locked { opacity:.35; cursor:not-allowed; }
 .nav-item-icon { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
 .nav-item-icon svg { width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
 .nav-item-label { font-size:13.5px; font-weight:500; }
@@ -1242,6 +1242,14 @@ function closeMobileSidebar() {
 // ── Page navigation ──────────────────────────────────────────────────
 const PAGE_NAMES = { fetch:'Data Fetch', preview:'Data Preview', export:'Export', analytics:'Analytics & Modeling' };
 function switchPageTab(tab) {
+  // Block locked tabs
+  const navEl = document.getElementById('nav-'+tab);
+  if (navEl && navEl.classList.contains('locked')) {
+    toast('Fetch data first to unlock this section.', 'error');
+    const fetchBtn = document.getElementById('fetchBtn');
+    if (fetchBtn) { fetchBtn.style.boxShadow='0 0 0 3px rgba(37,99,235,0.4)'; setTimeout(()=>fetchBtn.style.boxShadow='',1500); }
+    return;
+  }
   ['fetch','preview','export','analytics'].forEach(t => {
     document.getElementById('nav-'+t).classList.toggle('active', t===tab);
     document.getElementById('section-'+t).classList.toggle('active', t===tab);
@@ -1256,15 +1264,21 @@ function switchPageTab(tab) {
 function enableDataTabs() {
   ['preview','export','analytics'].forEach(id => {
     const el = document.getElementById('nav-'+id);
+    if (!el) return;
     el.classList.remove('locked');
-    el.querySelector('.nav-lock')?.remove();
+    // Remove all lock icons inside
+    el.querySelectorAll('.nav-lock').forEach(n => n.remove());
   });
-  document.getElementById('statusDot').classList.add('ready');
-  document.getElementById('statusText').textContent = allResults.length+' location(s) ready';
-  document.getElementById('nav-fetch-badge').textContent = allResults.length;
-  // Mark fetch as done
-  document.getElementById('nav-fetch').classList.add('done');
-  document.getElementById('exportBtn').disabled = false;
+  const dot = document.getElementById('statusDot');
+  if (dot) dot.classList.add('ready');
+  const st = document.getElementById('statusText');
+  if (st) st.textContent = allResults.length+' location(s) ready';
+  const badge = document.getElementById('nav-fetch-badge');
+  if (badge) badge.textContent = allResults.length;
+  const navFetch = document.getElementById('nav-fetch');
+  if (navFetch) navFetch.classList.add('done');
+  const expBtn = document.getElementById('exportBtn');
+  if (expBtn) expBtn.disabled = false;
 }
 // alias for legacy call
 function enableAnalyticsTab() { enableDataTabs(); }
