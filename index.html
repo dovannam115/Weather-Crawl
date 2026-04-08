@@ -900,7 +900,8 @@ async function exportExcel() {
     btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
   };
 
-  const ROWS_PER_SHEET = 50000; // ~50k rows per sheet to stay light
+  const MAX_FILES = 5; // max 5 files total (split between hourly + daily)
+  // Will calculate ROWS_PER_SHEET dynamically based on total rows
   const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   // Collect union of metric keys for a given data type
@@ -936,85 +937,82 @@ async function exportExcel() {
   try {
     await new Promise(r => setTimeout(r, 40));
 
-    let fileCount = 0;
-    let totalSheets = 0;
+    // ── Step 1: collect all rows per type ──────────────────────────
+    setLabel('Collecting data…');
+    await new Promise(r => setTimeout(r, 20));
+
+    const typeData = {}; // { hourly: { keys, header, rows }, daily: {...} }
+    let grandTotalRows = 0;
 
     for (const type of ['hourly', 'daily']) {
       const metricDefs = type === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
       const hasData = allResults.some(r => (type === 'hourly' ? r.data.hourly : r.data.daily)?.time?.length);
       if (!hasData) continue;
-
       const keys = getKeys(type);
       if (!keys.length) continue;
-      const header = buildHeader(keys, metricDefs);
 
-      // Collect ALL rows for this type first
-      setLabel(`Collecting ${type} data…`);
-      await new Promise(r => setTimeout(r, 20));
-
-      const allRows = [];
+      const rows = [];
       allResults.forEach(r => {
         const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
         if (!ds?.time?.length) return;
         for (let i = 0; i < ds.time.length; i++) {
           const row = new Array(keys.length + 2);
-          row[0] = r.name;
-          row[1] = ds.time[i];
+          row[0] = r.name; row[1] = ds.time[i];
           for (let j = 0; j < keys.length; j++) {
             const v = ds[keys[j]]?.[i];
             row[j + 2] = (v === null || v === undefined) ? '' : v;
           }
-          allRows.push(row);
+          rows.push(row);
         }
       });
 
-      // Split into chunks of ROWS_PER_SHEET
+      typeData[type] = { keys, header: buildHeader(keys, metricDefs), rows };
+      grandTotalRows += rows.length;
+    }
+
+    if (!grandTotalRows) { toast('No data to export.', 'error'); return; }
+
+    // ── Step 2: calculate rows-per-file so total files ≤ MAX_FILES ─
+    // Distribute MAX_FILES slots proportionally between hourly & daily
+    const types = Object.keys(typeData);
+    const rowsPerFile = Math.ceil(grandTotalRows / MAX_FILES);
+
+    // ── Step 3: build & download files ────────────────────────────
+    let fileCount = 0;
+
+    for (const type of types) {
+      const { header, rows } = typeData[type];
+      // Split into chunks of rowsPerFile
       const chunks = [];
-      for (let i = 0; i < allRows.length; i += ROWS_PER_SHEET) {
-        chunks.push(allRows.slice(i, i + ROWS_PER_SHEET));
+      for (let i = 0; i < rows.length; i += rowsPerFile) {
+        chunks.push(rows.slice(i, i + rowsPerFile));
       }
+      const total = chunks.length;
 
-      const needSplit = chunks.length > 1;
-
-      if (!needSplit) {
-        // Single file for this type
-        setLabel(`Building ${type} sheet…`);
+      for (let ci = 0; ci < total; ci++) {
+        const partNum = ci + 1;
+        const label = total > 1 ? `${type} ${partNum}/${total}` : type;
+        setLabel(`Building ${label}…`);
         await new Promise(r => setTimeout(r, 20));
+
         const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[0]]);
+        const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[ci]]);
         XLSX.utils.book_append_sheet(wb, ws, `${type}_data`);
-        setLabel(`Downloading ${type} file…`);
+
+        setLabel(`Downloading ${label}…`);
         await new Promise(r => setTimeout(r, 20));
+
+        const filename = total > 1
+          ? `weather_${type}_part${partNum}of${total}_${start}_${end}.xlsx`
+          : `weather_${type}_${start}_${end}.xlsx`;
+
+        downloadWb(wb, filename);
         fileCount++;
-        totalSheets++;
-        downloadWb(wb, `weather_${type}_${start}_${end}.xlsx`);
-        await new Promise(r => setTimeout(r, 800)); // small gap between downloads
-      } else {
-        // Multiple files, each with up to ROWS_PER_SHEET rows
-        for (let ci = 0; ci < chunks.length; ci++) {
-          const partNum = ci + 1;
-          setLabel(`Building ${type} part ${partNum}/${chunks.length}…`);
-          await new Promise(r => setTimeout(r, 20));
-          const wb = XLSX.utils.book_new();
-          const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[ci]]);
-          const sheetName = `${type}_data`;
-          XLSX.utils.book_append_sheet(wb, ws, sheetName);
-          setLabel(`Downloading ${type} part ${partNum}/${chunks.length}…`);
-          await new Promise(r => setTimeout(r, 20));
-          fileCount++;
-          totalSheets++;
-          downloadWb(wb, `weather_${type}_part${partNum}_${start}_${end}.xlsx`);
-          await new Promise(r => setTimeout(r, 800));
-        }
+        if (fileCount < MAX_FILES) await new Promise(r => setTimeout(r, 700));
       }
     }
 
-    if (!totalSheets) {
-      toast('No data to export.', 'error');
-      return;
-    }
-
-    toast(`✓ Downloaded ${fileCount} file(s) — ${allResults.length} locations, ${totalSheets} sheet(s) total`);
+    toast(`✓ Downloaded ${fileCount} file(s) — ${grandTotalRows.toLocaleString()} rows, ${allResults.length} locations`);
 
   } catch(err) {
     toast('Export failed: ' + err.message, 'error');
