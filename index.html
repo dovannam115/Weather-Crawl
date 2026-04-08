@@ -888,70 +888,114 @@ function resetForm() {
 }
 
 // ─── Export ───────────────────────────────────────────────────────
-function exportExcel() {
-  if(!allResults.length) { toast('No data to export.','error'); return; }
-  const wb = XLSX.utils.book_new();
+async function exportExcel() {
+  if (!allResults.length) { toast('No data to export.', 'error'); return; }
+
+  const btn = document.getElementById('exportBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Building…';
+
   const start = document.getElementById('startDate').value;
   const end   = document.getElementById('endDate').value;
 
-  // Build one sheet per data type (hourly / daily), all locations combined
-  // Format: location | date | metric1 | metric2 | ...
-  const buildCombinedSheet = (type, metricDefs) => {
-    // Collect all metric keys present across all results for this type
-    const allKeys = [];
-    allResults.forEach(r => {
-      const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-      if (!ds?.time?.length) return;
-      Object.keys(ds).filter(k => k !== 'time').forEach(k => {
-        if (!allKeys.includes(k)) allKeys.push(k);
+  // Yield to browser so UI updates before heavy work
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    const wb = XLSX.utils.book_new();
+
+    const buildSheet = (type, metricDefs) => {
+      // Collect union of all metric keys across locations
+      const allKeys = [];
+      allResults.forEach(r => {
+        const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
+        if (!ds?.time?.length) return;
+        Object.keys(ds).filter(k => k !== 'time').forEach(k => {
+          if (!allKeys.includes(k)) allKeys.push(k);
+        });
       });
-    });
-    if (!allKeys.length) return null;
+      if (!allKeys.length) return null;
 
-    // Header row: location | date | metric1 | metric2 ...
-    const headers = [
-      'Location',
-      'Date',
-      ...allKeys.map(k => {
-        const d = metricDefs.find(m => m.id === k);
-        return d ? `${d.label} (${d.unit})` : k;
-      })
-    ];
+      const headers = [
+        'Location', 'Date',
+        ...allKeys.map(k => {
+          const d = metricDefs.find(m => m.id === k);
+          return d ? `${d.label} (${d.unit})` : k;
+        })
+      ];
 
-    // Data rows: one row per location per time point
-    const rows = [];
-    allResults.forEach(r => {
-      const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-      if (!ds?.time?.length) return;
-      ds.time.forEach((t, i) => {
-        rows.push([
-          r.name,
-          t,
-          ...allKeys.map(k => {
-            const v = ds[k]?.[i];
-            return (v === null || v === undefined) ? '' : v;
-          })
-        ]);
+      // Build rows array
+      const allRows = [headers];
+      allResults.forEach(r => {
+        const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
+        if (!ds?.time?.length) return;
+        for (let i = 0; i < ds.time.length; i++) {
+          const row = new Array(allKeys.length + 2);
+          row[0] = r.name;
+          row[1] = ds.time[i];
+          for (let j = 0; j < allKeys.length; j++) {
+            const v = ds[allKeys[j]]?.[i];
+            row[j + 2] = (v === null || v === undefined) ? '' : v;
+          }
+          allRows.push(row);
+        }
       });
-    });
 
-    return XLSX.utils.aoa_to_sheet([headers, ...rows]);
-  };
+      return XLSX.utils.aoa_to_sheet(allRows);
+    };
 
-  const hasHourly = allResults.some(r => r.data.hourly?.time?.length);
-  const hasDaily  = allResults.some(r => r.data.daily?.time?.length);
+    if (allResults.some(r => r.data.hourly?.time?.length)) {
+      btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Hourly…';
+      await new Promise(r => setTimeout(r, 20));
+      const ws = buildSheet('hourly', HOURLY_METRICS);
+      if (ws) XLSX.utils.book_append_sheet(wb, ws, 'hourly_data');
+    }
 
-  if (hasHourly) {
-    const ws = buildCombinedSheet('hourly', HOURLY_METRICS);
-    if (ws) XLSX.utils.book_append_sheet(wb, ws, 'hourly_data');
+    if (allResults.some(r => r.data.daily?.time?.length)) {
+      btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Daily…';
+      await new Promise(r => setTimeout(r, 20));
+      const ws = buildSheet('daily', DAILY_METRICS);
+      if (ws) XLSX.utils.book_append_sheet(wb, ws, 'daily_data');
+    }
+
+    if (!wb.SheetNames.length) {
+      toast('No data to export.', 'error');
+      return;
+    }
+
+    btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Writing file…';
+    await new Promise(r => setTimeout(r, 20));
+
+    const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
+
+    // Always use Blob method — most reliable across all browsers
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+
+    const totalRows = wb.SheetNames.reduce((s, n) => {
+      const ws = wb.Sheets[n];
+      const ref = ws['!ref'];
+      if (!ref) return s;
+      const range = XLSX.utils.decode_range(ref);
+      return s + range.e.r; // rows excluding header
+    }, 0);
+
+    toast(`✓ Exported — ${wb.SheetNames.length} sheet(s), ~${totalRows.toLocaleString()} rows`);
+
+  } catch(err) {
+    toast('Export failed: ' + err.message, 'error');
+    console.error('Export error:', err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export to Excel`;
   }
-  if (hasDaily) {
-    const ws = buildCombinedSheet('daily', DAILY_METRICS);
-    if (ws) XLSX.utils.book_append_sheet(wb, ws, 'daily_data');
-  }
-
-  XLSX.writeFile(wb, `weather_${allResults.length}loc_${start}_${end}.xlsx`);
-  toast(`Exported ${wb.SheetNames.length} sheet(s) — ${allResults.length} location(s) combined.`);
 }
 
 // ─── Import Excel ─────────────────────────────────────────────────
@@ -965,7 +1009,17 @@ function downloadTemplate() {
   ]);
   ws['!cols']=[{wch:24},{wch:12},{wch:12}];
   XLSX.utils.book_append_sheet(wb,ws,'locations');
-  XLSX.writeFile(wb,'weather_locations_template.xlsx');
+  try {
+    XLSX.writeFile(wb, 'weather_locations_template.xlsx');
+  } catch(e) {
+    const out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+    const blob = new Blob([out], { type:'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'weather_locations_template.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }
 }
 function handleUpload(input) {
   const file=input.files[0]; if(!file) return;
