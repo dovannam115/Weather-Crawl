@@ -937,24 +937,71 @@ async function exportExcel() {
   try {
     await new Promise(r => setTimeout(r, 40));
 
-    // ── Step 1: collect all rows per type ──────────────────────────
-    setLabel('Collecting data…');
-    await new Promise(r => setTimeout(r, 20));
+    // Count total rows without building full array
+    const countRows = (type) =>
+      allResults.reduce((s, r) => s + ((type==='hourly' ? r.data.hourly : r.data.daily)?.time?.length || 0), 0);
 
-    const typeData = {}; // { hourly: { keys, header, rows }, daily: {...} }
-    let grandTotalRows = 0;
+    const hourlyTotal = countRows('hourly');
+    const dailyTotal  = countRows('daily');
+    const grandTotal  = hourlyTotal + dailyTotal;
 
-    for (const type of ['hourly', 'daily']) {
-      const metricDefs = type === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
-      const hasData = allResults.some(r => (type === 'hourly' ? r.data.hourly : r.data.daily)?.time?.length);
-      if (!hasData) continue;
-      const keys = getKeys(type);
-      if (!keys.length) continue;
+    if (!grandTotal) { toast('No data to export.', 'error'); return; }
 
-      const rows = [];
-      allResults.forEach(r => {
+    // Assign file slots proportionally (min 1 per type that has data)
+    const allocate = (typeTotal) => {
+      if (!typeTotal) return 0;
+      const other = grandTotal - typeTotal;
+      if (!other) return MAX_FILES; // only one type
+      return Math.max(1, Math.round(MAX_FILES * typeTotal / grandTotal));
+    };
+
+    let hSlots = allocate(hourlyTotal);
+    let dSlots = allocate(dailyTotal);
+    // Clamp to MAX_FILES total
+    while (hSlots + dSlots > MAX_FILES) { if (hSlots >= dSlots) hSlots--; else dSlots--; }
+
+    let fileCount = 0;
+
+    // ── Build & stream one file at a time, never holding all rows in RAM ──
+    const buildAndDownload = async (type, slots, metricDefs) => {
+      const total = allResults.reduce((s,r) => s+((type==='hourly'?r.data.hourly:r.data.daily)?.time?.length||0),0);
+      if (!total || !slots) return;
+
+      const keys   = getKeys(type);
+      const header = buildHeader(keys, metricDefs);
+      const rowsPerFile = Math.ceil(total / slots);
+
+      // Walk through locations/rows incrementally
+      let fileIdx   = 0;       // current file index
+      let rowInFile = 0;       // rows written to current file
+      let wb = XLSX.utils.book_new();
+      let wsData = [header];   // rows for current sheet
+
+      const flushFile = async () => {
+        const partNum = fileIdx + 1;
+        const label = slots > 1 ? `${type} ${partNum}/${slots}` : type;
+        setLabel(`Writing ${label}…`);
+        await new Promise(r => setTimeout(r, 15));
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        XLSX.utils.book_append_sheet(wb, ws, `${type}_data`);
+        const filename = slots > 1
+          ? `weather_${type}_part${partNum}of${slots}_${start}_${end}.xlsx`
+          : `weather_${type}_${start}_${end}.xlsx`;
+        downloadWb(wb, filename);
+        fileCount++;
+        await new Promise(r => setTimeout(r, 700));
+        // Reset for next file
+        wb = XLSX.utils.book_new();
+        wsData = [header];
+        rowInFile = 0;
+        fileIdx++;
+      };
+
+      for (const r of allResults) {
         const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-        if (!ds?.time?.length) return;
+        if (!ds?.time?.length) continue;
+        setLabel(`Processing ${r.name} (${type})…`);
+
         for (let i = 0; i < ds.time.length; i++) {
           const row = new Array(keys.length + 2);
           row[0] = r.name; row[1] = ds.time[i];
@@ -962,57 +1009,24 @@ async function exportExcel() {
             const v = ds[keys[j]]?.[i];
             row[j + 2] = (v === null || v === undefined) ? '' : v;
           }
-          rows.push(row);
+          wsData.push(row);
+          rowInFile++;
+
+          // Flush when we hit rowsPerFile AND there are more files to write
+          if (rowInFile >= rowsPerFile && fileIdx < slots - 1) {
+            await flushFile();
+          }
         }
-      });
-
-      typeData[type] = { keys, header: buildHeader(keys, metricDefs), rows };
-      grandTotalRows += rows.length;
-    }
-
-    if (!grandTotalRows) { toast('No data to export.', 'error'); return; }
-
-    // ── Step 2: calculate rows-per-file so total files ≤ MAX_FILES ─
-    // Distribute MAX_FILES slots proportionally between hourly & daily
-    const types = Object.keys(typeData);
-    const rowsPerFile = Math.ceil(grandTotalRows / MAX_FILES);
-
-    // ── Step 3: build & download files ────────────────────────────
-    let fileCount = 0;
-
-    for (const type of types) {
-      const { header, rows } = typeData[type];
-      // Split into chunks of rowsPerFile
-      const chunks = [];
-      for (let i = 0; i < rows.length; i += rowsPerFile) {
-        chunks.push(rows.slice(i, i + rowsPerFile));
       }
-      const total = chunks.length;
 
-      for (let ci = 0; ci < total; ci++) {
-        const partNum = ci + 1;
-        const label = total > 1 ? `${type} ${partNum}/${total}` : type;
-        setLabel(`Building ${label}…`);
-        await new Promise(r => setTimeout(r, 20));
+      // Flush last file
+      if (wsData.length > 1) await flushFile();
+    };
 
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[ci]]);
-        XLSX.utils.book_append_sheet(wb, ws, `${type}_data`);
+    await buildAndDownload('hourly', hSlots, HOURLY_METRICS);
+    await buildAndDownload('daily',  dSlots, DAILY_METRICS);
 
-        setLabel(`Downloading ${label}…`);
-        await new Promise(r => setTimeout(r, 20));
-
-        const filename = total > 1
-          ? `weather_${type}_part${partNum}of${total}_${start}_${end}.xlsx`
-          : `weather_${type}_${start}_${end}.xlsx`;
-
-        downloadWb(wb, filename);
-        fileCount++;
-        if (fileCount < MAX_FILES) await new Promise(r => setTimeout(r, 700));
-      }
-    }
-
-    toast(`✓ Downloaded ${fileCount} file(s) — ${grandTotalRows.toLocaleString()} rows, ${allResults.length} locations`);
+    toast(`✓ Downloaded ${fileCount} file(s) — ${grandTotal.toLocaleString()} rows, ${allResults.length} locations`);
 
   } catch(err) {
     toast('Export failed: ' + err.message, 'error');
