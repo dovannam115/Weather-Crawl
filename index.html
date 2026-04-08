@@ -437,10 +437,7 @@ tbody td:first-child{color:var(--blue);font-weight:500}
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
         Fetch Weather Data
       </button>
-      <button class="btn btn-success" id="exportBtn" onclick="exportExcel()" disabled>
-        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Export to Excel
-      </button>
+      <div id="exportBtn" style="display:none"></div>
       <button class="btn btn-ghost" onclick="resetForm()">
         <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
         Reset
@@ -746,7 +743,7 @@ function cancelFetch() {
   document.getElementById('spinnerText').textContent = 'Cancelling…';
 }
 
-// ─── Fetch all ────────────────────────────────────────────────────
+// ─── Fetch & export stream (no RAM accumulation) ──────────────────
 async function fetchAllData() {
   if(!validate()) return;
   _fetchCancelled = false;
@@ -757,52 +754,135 @@ async function fetchAllData() {
   const useD  = document.getElementById('chkDaily').checked;
 
   document.getElementById('fetchBtn').disabled = true;
-  document.getElementById('exportBtn').disabled = true;
   document.getElementById('spinner').classList.add('visible');
   document.getElementById('progressWrap').classList.add('visible');
   document.getElementById('progressFill').style.width = '0%';
   document.getElementById('results').innerHTML = '';
   allResults = [];
 
+  // ── CSV streaming buffers — grow incrementally, never hold xlsx in RAM ──
+  // Format: location, date, metric1, metric2, ...
+  // One CSV per data type (hourly / daily)
+  const csvH = { lines: [], keys: null, header: null }; // hourly
+  const csvD = { lines: [], keys: null, header: null }; // daily
+
+  const escapeCSV = v => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('
+') ? `"${s.replace(/"/g,'""')}"` : s;
+  };
+
+  const appendToCSV = (buf, locName, ds, metricDefs) => {
+    if (!ds?.time?.length) return 0;
+    const keys = Object.keys(ds).filter(k => k !== 'time');
+    // Build header once from first location
+    if (!buf.keys) {
+      buf.keys = keys;
+      const hdr = ['Location', 'Date', ...keys.map(k => {
+        const d = metricDefs.find(m => m.id === k);
+        return d ? `${d.label} (${d.unit})` : k;
+      })];
+      buf.header = hdr.map(escapeCSV).join(',');
+      buf.lines.push(buf.header);
+    }
+    for (let i = 0; i < ds.time.length; i++) {
+      const cells = [locName, ds.time[i], ...keys.map(k => ds[k]?.[i] ?? '')];
+      buf.lines.push(cells.map(escapeCSV).join(','));
+    }
+    return ds.time.length;
+  };
+
   const errors = [];
-  for(let i=0; i<locs.length; i++) {
-    if(_fetchCancelled) { errors.push('Fetch cancelled by user.'); break; }
+  let successCount = 0, totalHRows = 0, totalDRows = 0;
+
+  for (let i = 0; i < locs.length; i++) {
+    if (_fetchCancelled) { errors.push('Cancelled by user.'); break; }
     const loc = locs[i];
-    const pct = Math.round((i/locs.length)*100);
-    document.getElementById('progressFill').style.width = pct+'%';
-    document.getElementById('progressPct').textContent  = pct+'%';
+    const pct = Math.round((i / locs.length) * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressPct').textContent  = pct + '%';
     document.getElementById('progressLabel').textContent = `${i+1}/${locs.length}: ${loc.name}`;
-    document.getElementById('spinnerText').textContent   = loc.name+'…';
+    document.getElementById('spinnerText').textContent   = `Fetching ${loc.name}…`;
+
     const params = new URLSearchParams({latitude:loc.lat, longitude:loc.lon, start_date:start, end_date:end, timezone:'auto'});
-    if(useH) params.append('hourly', [...checkedHourly].join(','));
-    if(useD) params.append('daily',  [...checkedDaily].join(','));
+    if (useH) params.append('hourly', [...checkedHourly].join(','));
+    if (useD) params.append('daily',  [...checkedDaily].join(','));
+
     try {
-      const data = await fetchWithRetry('https://archive-api.open-meteo.com/v1/archive?'+params, loc.name);
-      allResults.push({name:loc.name, lat:loc.lat, lon:loc.lon, data, color:LOC_COLORS[i%LOC_COLORS.length]});
-      if(i < locs.length-1) await sleep(400);
+      const data = await fetchWithRetry('https://archive-api.open-meteo.com/v1/archive?' + params, loc.name);
+
+      // Append to CSV buffers — O(n) string concat, not object graph
+      const hRows = appendToCSV(csvH, loc.name, data.hourly, HOURLY_METRICS);
+      const dRows = appendToCSV(csvD, loc.name, data.daily,  DAILY_METRICS);
+      totalHRows += hRows; totalDRows += dRows;
+      successCount++;
+
+      // Store preview only (first 50 rows)
+      allResults.push({
+        name: loc.name, lat: loc.lat, lon: loc.lon,
+        color: LOC_COLORS[i % LOC_COLORS.length],
+        hRows, dRows,
+        preview: {
+          hourly: data.hourly?.time?.length ? {
+            time: data.hourly.time.slice(0,50),
+            ...Object.fromEntries(Object.keys(data.hourly).filter(k=>k!=='time').map(k=>[k,data.hourly[k].slice(0,50)]))
+          } : null,
+          daily: data.daily?.time?.length ? {
+            time: data.daily.time.slice(0,50),
+            ...Object.fromEntries(Object.keys(data.daily).filter(k=>k!=='time').map(k=>[k,data.daily[k].slice(0,50)]))
+          } : null,
+        }
+      });
+
+      if (i < locs.length - 1) await sleep(400);
     } catch(e) {
       errors.push(`"${loc.name}": ${e.message}`);
     }
   }
 
+  // ── Download CSV file(s) ───────────────────────────────────────────
+  document.getElementById('progressLabel').textContent = 'Preparing download…';
+  await new Promise(r => setTimeout(r, 30));
+
+  const downloadCSV = (lines, filename) => {
+    if (lines.length <= 1) return; // header only = no data
+    const blob = new Blob([lines.join('
+')], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 3000);
+  };
+
+  let fileCount = 0;
+  if (csvH.lines.length > 1) {
+    downloadCSV(csvH.lines, `weather_hourly_${start}_${end}.csv`);
+    fileCount++;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (csvD.lines.length > 1) {
+    downloadCSV(csvD.lines, `weather_daily_${start}_${end}.csv`);
+    fileCount++;
+  }
+
   document.getElementById('progressFill').style.width = '100%';
   document.getElementById('progressPct').textContent  = '100%';
-  document.getElementById('progressLabel').textContent = `Done — ${allResults.length}/${locs.length} locations`;
+  document.getElementById('progressLabel').textContent = `Done — ${successCount}/${locs.length} locations`;
   document.getElementById('spinner').classList.remove('visible');
   document.getElementById('fetchBtn').disabled = false;
 
-  if(allResults.length) {
+  if (allResults.length) {
     renderResults();
-    document.getElementById('exportBtn').disabled = false;
     document.getElementById('statusDot').classList.add('ready');
-    document.getElementById('statusText').textContent = allResults.length+' location(s) ready';
-    const totalH = allResults.reduce((s,r)=>s+(r.data.hourly?.time?.length||0),0);
-    const totalD = allResults.reduce((s,r)=>s+(r.data.daily?.time?.length||0),0);
-    const parts=[]; if(totalH) parts.push(totalH.toLocaleString()+' hourly'); if(totalD) parts.push(totalD.toLocaleString()+' daily');
-    if(errors.length) showError(`${errors.length} location(s) failed: ${errors.join(' | ')}`);
-    else { hideError(); toast(`${allResults.length} location(s) fetched — ${parts.join(' · ')} records`); }
+    document.getElementById('statusText').textContent = `${successCount} location(s) ready`;
+    const parts = [];
+    if (totalHRows) parts.push(totalHRows.toLocaleString() + ' hourly rows');
+    if (totalDRows) parts.push(totalDRows.toLocaleString() + ' daily rows');
+    if (errors.length) showError(`${errors.length} location(s) failed: ${errors.join(' | ')}`);
+    else { hideError(); toast(`✓ ${fileCount} CSV file(s) downloaded — ${parts.join(', ')}`); }
   } else {
-    showError('All requests failed. '+errors.join(' | '));
+    showError('All requests failed. ' + errors.join(' | '));
     document.getElementById('progressWrap').classList.remove('visible');
     renderEmptyState();
   }
@@ -815,19 +895,22 @@ function renderResults() {
   allResults.forEach(r => {
     const sec = document.createElement('div'); sec.className='results-section';
     const hdr = document.createElement('div'); hdr.className='results-loc-header';
-    hdr.innerHTML=`<div class="results-loc-name"><div class="loc-dot" style="background:${r.color}"></div>${r.name}</div><div class="results-loc-coords">${r.lat}°, ${r.lon}°</div>`;
+    hdr.innerHTML=`<div class="results-loc-name"><div class="loc-dot" style="background:${r.color}"></div>${r.name}</div>
+      <div class="results-loc-coords">${r.lat}°, ${r.lon}° &nbsp;·&nbsp; ${r.hRows?r.hRows.toLocaleString()+' hourly':''} ${r.dRows?r.dRows.toLocaleString()+' daily':''}</div>`;
     sec.appendChild(hdr);
-    const hasH=r.data.hourly?.time?.length, hasD=r.data.daily?.time?.length;
+    // Use preview data (first 50 rows only — full data already exported)
+    const hasH = r.preview?.hourly?.time?.length;
+    const hasD = r.preview?.daily?.time?.length;
     if(hasH&&hasD) {
       const tabs=document.createElement('div'); tabs.className='result-tabs';
       const slug=r.name.replace(/\s/g,'-');
-      tabs.innerHTML=`<button class="result-tab active" onclick="switchResultTab(this,'rh-${slug}','rd-${slug}')">⏱ Hourly (${hasH.toLocaleString()})</button>
-        <button class="result-tab" onclick="switchResultTab(this,'rd-${slug}','rh-${slug}')">📅 Daily (${hasD.toLocaleString()})</button>`;
+      tabs.innerHTML=`<button class="result-tab active" onclick="switchResultTab(this,'rh-${slug}','rd-${slug}')">⏱ Hourly preview</button>
+        <button class="result-tab" onclick="switchResultTab(this,'rd-${slug}','rh-${slug}')">📅 Daily preview</button>`;
       sec.appendChild(tabs);
-      const wH=buildTableCard(r.data.hourly,HOURLY_METRICS); wH.id='rh-'+slug; sec.appendChild(wH);
-      const wD=buildTableCard(r.data.daily,DAILY_METRICS);   wD.id='rd-'+slug; wD.style.display='none'; sec.appendChild(wD);
-    } else if(hasH) { sec.appendChild(buildTableCard(r.data.hourly,HOURLY_METRICS)); }
-    else if(hasD)   { sec.appendChild(buildTableCard(r.data.daily, DAILY_METRICS)); }
+      const wH=buildTableCard(r.preview.hourly,HOURLY_METRICS,r.hRows); wH.id='rh-'+slug; sec.appendChild(wH);
+      const wD=buildTableCard(r.preview.daily,DAILY_METRICS,r.dRows);   wD.id='rd-'+slug; wD.style.display='none'; sec.appendChild(wD);
+    } else if(hasH) { sec.appendChild(buildTableCard(r.preview.hourly,HOURLY_METRICS,r.hRows)); }
+    else if(hasD)   { sec.appendChild(buildTableCard(r.preview.daily, DAILY_METRICS, r.dRows)); }
     container.appendChild(sec);
   });
 }
@@ -837,9 +920,9 @@ function switchResultTab(btn,showId,hideId) {
   document.getElementById(showId).style.display='';
   document.getElementById(hideId).style.display='none';
 }
-function buildTableCard(dataset, metricDefs) {
+function buildTableCard(dataset, metricDefs, totalRows) {
   const keys  = Object.keys(dataset).filter(k=>k!=='time');
-  const total = dataset.time.length; const LIMIT=200;
+  const total = totalRows || dataset.time.length; const LIMIT=200;
   const card=document.createElement('div'); card.className='table-card';
   const wrap=document.createElement('div'); wrap.className='table-wrap';
   const tbl=document.createElement('table');
@@ -857,7 +940,8 @@ function buildTableCard(dataset, metricDefs) {
   }
   tbl.appendChild(tbody); wrap.appendChild(tbl); card.appendChild(wrap);
   const foot=document.createElement('div'); foot.className='table-footer';
-  foot.innerHTML=`<span>${total>LIMIT?`Showing first ${LIMIT} of ${total.toLocaleString()} rows`:total.toLocaleString()+' rows'}</span><span>${keys.length} metric${keys.length!==1?'s':''}</span>`;
+  const previewNote = dataset.time.length < total ? ` (preview — full data in Excel file)` : '';
+  foot.innerHTML=`<span>${dataset.time.length.toLocaleString()} rows shown${previewNote}</span><span>${total.toLocaleString()} total · ${keys.length} metric${keys.length!==1?'s':''}</span>`;
   card.appendChild(foot);
   return card;
 }
@@ -893,72 +977,69 @@ async function exportExcel() {
 
   const btn = document.getElementById('exportBtn');
   btn.disabled = true;
-  const setLabel = txt => btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
-  setLabel('Building…');
+  const setLabel = txt => btn.innerHTML =
+    `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
 
   const start = document.getElementById('startDate').value;
   const end   = document.getElementById('endDate').value;
-  await new Promise(r => setTimeout(r, 40));
+  const MIME  = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-  try {
-    const wb = XLSX.utils.book_new();
-
-    for (const r of allResults) {
-      // Sanitize sheet name: max 31 chars, no special chars
-      const safeName = r.name.replace(/[:\\/\?\*\[\]]/g, '').trim().slice(0, 31) || 'Location';
-
-      // Collect all metric keys for this location (hourly + daily combined)
-      const buildLocSheet = (ds, metricDefs, typeSuffix) => {
-        if (!ds?.time?.length) return;
-        const keys = Object.keys(ds).filter(k => k !== 'time');
-        if (!keys.length) return;
-
-        const header = [
-          'Date',
-          ...keys.map(k => {
-            const d = metricDefs.find(m => m.id === k);
-            return d ? `${d.label} (${d.unit})` : k;
-          })
-        ];
-
-        const rows = [];
-        for (let i = 0; i < ds.time.length; i++) {
-          const row = new Array(keys.length + 1);
-          row[0] = ds.time[i];
-          for (let j = 0; j < keys.length; j++) {
-            const v = ds[keys[j]]?.[i];
-            row[j + 1] = (v === null || v === undefined) ? '' : v;
-          }
-          rows.push(row);
-        }
-
-        const sheetName = (safeName + typeSuffix).slice(0, 31);
-        const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-        XLSX.utils.book_append_sheet(wb, ws, sheetName === '' ? 'Sheet' : sheetName);
-      };
-
-      setLabel(`Building: ${r.name}…`);
-      await new Promise(r => setTimeout(r, 10));
-
-      if (r.data.hourly?.time?.length) buildLocSheet(r.data.hourly, HOURLY_METRICS, r.data.daily?.time?.length ? '_H' : '');
-      if (r.data.daily?.time?.length)  buildLocSheet(r.data.daily,  DAILY_METRICS,  r.data.hourly?.time?.length ? '_D' : '');
-    }
-
-    if (!wb.SheetNames.length) { toast('No data to export.', 'error'); return; }
-
-    setLabel('Writing file…');
-    await new Promise(r => setTimeout(r, 20));
-
-    const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob  = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url   = URL.createObjectURL(blob);
-    const a     = document.createElement('a');
+  const downloadBlob = (wb, filename) => {
+    const buf  = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([buf], { type: MIME });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+  };
 
-    toast(`✓ Exported ${wb.SheetNames.length} sheet(s) — ${allResults.length} location(s) in 1 file`);
+  const buildSheet = (ds, metricDefs) => {
+    const keys = Object.keys(ds).filter(k => k !== 'time');
+    const header = ['Date', ...keys.map(k => {
+      const d = metricDefs.find(m => m.id === k);
+      return d ? `${d.label} (${d.unit})` : k;
+    })];
+    const rows = [];
+    for (let i = 0; i < ds.time.length; i++) {
+      const row = [ds.time[i]];
+      for (const k of keys) {
+        const v = ds[k]?.[i];
+        row.push(v === null || v === undefined ? '' : v);
+      }
+      rows.push(row);
+    }
+    return XLSX.utils.aoa_to_sheet([header, ...rows]);
+  };
+
+  let done = 0;
+  try {
+    for (const r of allResults) {
+      setLabel(`${done + 1}/${allResults.length}: ${r.name}…`);
+      await new Promise(resolve => setTimeout(resolve, 30)); // yield to browser
+
+      const safe = r.name.replace(/[:\\/\?\*\[\]]/g, '').trim().slice(0, 20) || 'loc';
+      const wb   = XLSX.utils.book_new();
+
+      if (r.data.hourly?.time?.length) {
+        const ws = buildSheet(r.data.hourly, HOURLY_METRICS);
+        XLSX.utils.book_append_sheet(wb, ws, 'hourly');
+      }
+      if (r.data.daily?.time?.length) {
+        const ws = buildSheet(r.data.daily, DAILY_METRICS);
+        XLSX.utils.book_append_sheet(wb, ws, 'daily');
+      }
+
+      if (!wb.SheetNames.length) { done++; continue; }
+
+      downloadBlob(wb, `weather_${safe}_${start}_${end}.xlsx`);
+      done++;
+
+      // Small pause between downloads so browser doesn't block
+      await new Promise(resolve => setTimeout(resolve, 600));
+    }
+
+    toast(`✓ Downloaded ${done} file(s) — 1 file per location`);
 
   } catch(err) {
     toast('Export failed: ' + err.message, 'error');
