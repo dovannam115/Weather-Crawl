@@ -893,151 +893,81 @@ async function exportExcel() {
 
   const btn = document.getElementById('exportBtn');
   btn.disabled = true;
+  const setLabel = txt => btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
+  setLabel('Building…');
+
   const start = document.getElementById('startDate').value;
   const end   = document.getElementById('endDate').value;
+  await new Promise(r => setTimeout(r, 40));
 
-  const setLabel = txt => {
-    btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
-  };
+  try {
+    const wb = XLSX.utils.book_new();
 
-  const MAX_FILES = 5; // max 5 files total (split between hourly + daily)
-  // Will calculate ROWS_PER_SHEET dynamically based on total rows
-  const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    for (const r of allResults) {
+      // Sanitize sheet name: max 31 chars, no special chars
+      const safeName = r.name.replace(/[:\\/\?\*\[\]]/g, '').trim().slice(0, 31) || 'Location';
 
-  // Collect union of metric keys for a given data type
-  const getKeys = (type) => {
-    const keys = [];
-    allResults.forEach(r => {
-      const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-      if (!ds?.time?.length) return;
-      Object.keys(ds).filter(k => k !== 'time').forEach(k => {
-        if (!keys.includes(k)) keys.push(k);
-      });
-    });
-    return keys;
-  };
+      // Collect all metric keys for this location (hourly + daily combined)
+      const buildLocSheet = (ds, metricDefs, typeSuffix) => {
+        if (!ds?.time?.length) return;
+        const keys = Object.keys(ds).filter(k => k !== 'time');
+        if (!keys.length) return;
 
-  // Build header row
-  const buildHeader = (keys, metricDefs) => [
-    'Location', 'Date',
-    ...keys.map(k => { const d = metricDefs.find(m => m.id === k); return d ? `${d.label} (${d.unit})` : k; })
-  ];
+        const header = [
+          'Date',
+          ...keys.map(k => {
+            const d = metricDefs.find(m => m.id === k);
+            return d ? `${d.label} (${d.unit})` : k;
+          })
+        ];
 
-  // Download a workbook as blob
-  const downloadWb = (wb, filename) => {
-    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([out], { type: MIME });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+        const rows = [];
+        for (let i = 0; i < ds.time.length; i++) {
+          const row = new Array(keys.length + 1);
+          row[0] = ds.time[i];
+          for (let j = 0; j < keys.length; j++) {
+            const v = ds[keys[j]]?.[i];
+            row[j + 1] = (v === null || v === undefined) ? '' : v;
+          }
+          rows.push(row);
+        }
+
+        const sheetName = (safeName + typeSuffix).slice(0, 31);
+        const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName === '' ? 'Sheet' : sheetName);
+      };
+
+      setLabel(`Building: ${r.name}…`);
+      await new Promise(r => setTimeout(r, 10));
+
+      if (r.data.hourly?.time?.length) buildLocSheet(r.data.hourly, HOURLY_METRICS, r.data.daily?.time?.length ? '_H' : '');
+      if (r.data.daily?.time?.length)  buildLocSheet(r.data.daily,  DAILY_METRICS,  r.data.hourly?.time?.length ? '_D' : '');
+    }
+
+    if (!wb.SheetNames.length) { toast('No data to export.', 'error'); return; }
+
+    setLabel('Writing file…');
+    await new Promise(r => setTimeout(r, 20));
+
+    const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob  = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
-  };
 
-  try {
-    await new Promise(r => setTimeout(r, 40));
-
-    // Count total rows without building full array
-    const countRows = (type) =>
-      allResults.reduce((s, r) => s + ((type==='hourly' ? r.data.hourly : r.data.daily)?.time?.length || 0), 0);
-
-    const hourlyTotal = countRows('hourly');
-    const dailyTotal  = countRows('daily');
-    const grandTotal  = hourlyTotal + dailyTotal;
-
-    if (!grandTotal) { toast('No data to export.', 'error'); return; }
-
-    // Assign file slots proportionally (min 1 per type that has data)
-    const allocate = (typeTotal) => {
-      if (!typeTotal) return 0;
-      const other = grandTotal - typeTotal;
-      if (!other) return MAX_FILES; // only one type
-      return Math.max(1, Math.round(MAX_FILES * typeTotal / grandTotal));
-    };
-
-    let hSlots = allocate(hourlyTotal);
-    let dSlots = allocate(dailyTotal);
-    // Clamp to MAX_FILES total
-    while (hSlots + dSlots > MAX_FILES) { if (hSlots >= dSlots) hSlots--; else dSlots--; }
-
-    let fileCount = 0;
-
-    // ── Build & stream one file at a time, never holding all rows in RAM ──
-    const buildAndDownload = async (type, slots, metricDefs) => {
-      const total = allResults.reduce((s,r) => s+((type==='hourly'?r.data.hourly:r.data.daily)?.time?.length||0),0);
-      if (!total || !slots) return;
-
-      const keys   = getKeys(type);
-      const header = buildHeader(keys, metricDefs);
-      const rowsPerFile = Math.ceil(total / slots);
-
-      // Walk through locations/rows incrementally
-      let fileIdx   = 0;       // current file index
-      let rowInFile = 0;       // rows written to current file
-      let wb = XLSX.utils.book_new();
-      let wsData = [header];   // rows for current sheet
-
-      const flushFile = async () => {
-        const partNum = fileIdx + 1;
-        const label = slots > 1 ? `${type} ${partNum}/${slots}` : type;
-        setLabel(`Writing ${label}…`);
-        await new Promise(r => setTimeout(r, 15));
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        XLSX.utils.book_append_sheet(wb, ws, `${type}_data`);
-        const filename = slots > 1
-          ? `weather_${type}_part${partNum}of${slots}_${start}_${end}.xlsx`
-          : `weather_${type}_${start}_${end}.xlsx`;
-        downloadWb(wb, filename);
-        fileCount++;
-        await new Promise(r => setTimeout(r, 700));
-        // Reset for next file
-        wb = XLSX.utils.book_new();
-        wsData = [header];
-        rowInFile = 0;
-        fileIdx++;
-      };
-
-      for (const r of allResults) {
-        const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-        if (!ds?.time?.length) continue;
-        setLabel(`Processing ${r.name} (${type})…`);
-
-        for (let i = 0; i < ds.time.length; i++) {
-          const row = new Array(keys.length + 2);
-          row[0] = r.name; row[1] = ds.time[i];
-          for (let j = 0; j < keys.length; j++) {
-            const v = ds[keys[j]]?.[i];
-            row[j + 2] = (v === null || v === undefined) ? '' : v;
-          }
-          wsData.push(row);
-          rowInFile++;
-
-          // Flush when we hit rowsPerFile AND there are more files to write
-          if (rowInFile >= rowsPerFile && fileIdx < slots - 1) {
-            await flushFile();
-          }
-        }
-      }
-
-      // Flush last file
-      if (wsData.length > 1) await flushFile();
-    };
-
-    await buildAndDownload('hourly', hSlots, HOURLY_METRICS);
-    await buildAndDownload('daily',  dSlots, DAILY_METRICS);
-
-    toast(`✓ Downloaded ${fileCount} file(s) — ${grandTotal.toLocaleString()} rows, ${allResults.length} locations`);
+    toast(`✓ Exported ${wb.SheetNames.length} sheet(s) — ${allResults.length} location(s) in 1 file`);
 
   } catch(err) {
     toast('Export failed: ' + err.message, 'error');
-    console.error('Export error:', err);
+    console.error(err);
   } finally {
     btn.disabled = false;
     btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export to Excel`;
   }
 }
-
-
 // ─── Import Excel ─────────────────────────────────────────────────
 function downloadTemplate() {
   const wb=XLSX.utils.book_new();
