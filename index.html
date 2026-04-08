@@ -893,101 +893,128 @@ async function exportExcel() {
 
   const btn = document.getElementById('exportBtn');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Building…';
-
   const start = document.getElementById('startDate').value;
   const end   = document.getElementById('endDate').value;
 
-  // Yield to browser so UI updates before heavy work
-  await new Promise(r => setTimeout(r, 50));
+  const setLabel = txt => {
+    btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> ${txt}`;
+  };
+
+  const ROWS_PER_SHEET = 50000; // ~50k rows per sheet to stay light
+  const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  // Collect union of metric keys for a given data type
+  const getKeys = (type) => {
+    const keys = [];
+    allResults.forEach(r => {
+      const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
+      if (!ds?.time?.length) return;
+      Object.keys(ds).filter(k => k !== 'time').forEach(k => {
+        if (!keys.includes(k)) keys.push(k);
+      });
+    });
+    return keys;
+  };
+
+  // Build header row
+  const buildHeader = (keys, metricDefs) => [
+    'Location', 'Date',
+    ...keys.map(k => { const d = metricDefs.find(m => m.id === k); return d ? `${d.label} (${d.unit})` : k; })
+  ];
+
+  // Download a workbook as blob
+  const downloadWb = (wb, filename) => {
+    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([out], { type: MIME });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+  };
 
   try {
-    const wb = XLSX.utils.book_new();
+    await new Promise(r => setTimeout(r, 40));
 
-    const buildSheet = (type, metricDefs) => {
-      // Collect union of all metric keys across locations
-      const allKeys = [];
-      allResults.forEach(r => {
-        const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
-        if (!ds?.time?.length) return;
-        Object.keys(ds).filter(k => k !== 'time').forEach(k => {
-          if (!allKeys.includes(k)) allKeys.push(k);
-        });
-      });
-      if (!allKeys.length) return null;
+    let fileCount = 0;
+    let totalSheets = 0;
 
-      const headers = [
-        'Location', 'Date',
-        ...allKeys.map(k => {
-          const d = metricDefs.find(m => m.id === k);
-          return d ? `${d.label} (${d.unit})` : k;
-        })
-      ];
+    for (const type of ['hourly', 'daily']) {
+      const metricDefs = type === 'hourly' ? HOURLY_METRICS : DAILY_METRICS;
+      const hasData = allResults.some(r => (type === 'hourly' ? r.data.hourly : r.data.daily)?.time?.length);
+      if (!hasData) continue;
 
-      // Build rows array
-      const allRows = [headers];
+      const keys = getKeys(type);
+      if (!keys.length) continue;
+      const header = buildHeader(keys, metricDefs);
+
+      // Collect ALL rows for this type first
+      setLabel(`Collecting ${type} data…`);
+      await new Promise(r => setTimeout(r, 20));
+
+      const allRows = [];
       allResults.forEach(r => {
         const ds = type === 'hourly' ? r.data.hourly : r.data.daily;
         if (!ds?.time?.length) return;
         for (let i = 0; i < ds.time.length; i++) {
-          const row = new Array(allKeys.length + 2);
+          const row = new Array(keys.length + 2);
           row[0] = r.name;
           row[1] = ds.time[i];
-          for (let j = 0; j < allKeys.length; j++) {
-            const v = ds[allKeys[j]]?.[i];
+          for (let j = 0; j < keys.length; j++) {
+            const v = ds[keys[j]]?.[i];
             row[j + 2] = (v === null || v === undefined) ? '' : v;
           }
           allRows.push(row);
         }
       });
 
-      return XLSX.utils.aoa_to_sheet(allRows);
-    };
+      // Split into chunks of ROWS_PER_SHEET
+      const chunks = [];
+      for (let i = 0; i < allRows.length; i += ROWS_PER_SHEET) {
+        chunks.push(allRows.slice(i, i + ROWS_PER_SHEET));
+      }
 
-    if (allResults.some(r => r.data.hourly?.time?.length)) {
-      btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Hourly…';
-      await new Promise(r => setTimeout(r, 20));
-      const ws = buildSheet('hourly', HOURLY_METRICS);
-      if (ws) XLSX.utils.book_append_sheet(wb, ws, 'hourly_data');
+      const needSplit = chunks.length > 1;
+
+      if (!needSplit) {
+        // Single file for this type
+        setLabel(`Building ${type} sheet…`);
+        await new Promise(r => setTimeout(r, 20));
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[0]]);
+        XLSX.utils.book_append_sheet(wb, ws, `${type}_data`);
+        setLabel(`Downloading ${type} file…`);
+        await new Promise(r => setTimeout(r, 20));
+        fileCount++;
+        totalSheets++;
+        downloadWb(wb, `weather_${type}_${start}_${end}.xlsx`);
+        await new Promise(r => setTimeout(r, 800)); // small gap between downloads
+      } else {
+        // Multiple files, each with up to ROWS_PER_SHEET rows
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const partNum = ci + 1;
+          setLabel(`Building ${type} part ${partNum}/${chunks.length}…`);
+          await new Promise(r => setTimeout(r, 20));
+          const wb = XLSX.utils.book_new();
+          const ws = XLSX.utils.aoa_to_sheet([header, ...chunks[ci]]);
+          const sheetName = `${type}_data`;
+          XLSX.utils.book_append_sheet(wb, ws, sheetName);
+          setLabel(`Downloading ${type} part ${partNum}/${chunks.length}…`);
+          await new Promise(r => setTimeout(r, 20));
+          fileCount++;
+          totalSheets++;
+          downloadWb(wb, `weather_${type}_part${partNum}_${start}_${end}.xlsx`);
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
     }
 
-    if (allResults.some(r => r.data.daily?.time?.length)) {
-      btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Daily…';
-      await new Promise(r => setTimeout(r, 20));
-      const ws = buildSheet('daily', DAILY_METRICS);
-      if (ws) XLSX.utils.book_append_sheet(wb, ws, 'daily_data');
-    }
-
-    if (!wb.SheetNames.length) {
+    if (!totalSheets) {
       toast('No data to export.', 'error');
       return;
     }
 
-    btn.innerHTML = '<div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div> Writing file…';
-    await new Promise(r => setTimeout(r, 20));
-
-    const filename = `weather_${allResults.length}loc_${start}_${end}.xlsx`;
-
-    // Always use Blob method — most reliable across all browsers
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
-
-    const totalRows = wb.SheetNames.reduce((s, n) => {
-      const ws = wb.Sheets[n];
-      const ref = ws['!ref'];
-      if (!ref) return s;
-      const range = XLSX.utils.decode_range(ref);
-      return s + range.e.r; // rows excluding header
-    }, 0);
-
-    toast(`✓ Exported — ${wb.SheetNames.length} sheet(s), ~${totalRows.toLocaleString()} rows`);
+    toast(`✓ Downloaded ${fileCount} file(s) — ${allResults.length} locations, ${totalSheets} sheet(s) total`);
 
   } catch(err) {
     toast('Export failed: ' + err.message, 'error');
@@ -997,6 +1024,7 @@ async function exportExcel() {
     btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export to Excel`;
   }
 }
+
 
 // ─── Import Excel ─────────────────────────────────────────────────
 function downloadTemplate() {
