@@ -760,27 +760,63 @@ async function fetchAllData() {
   document.getElementById('results').innerHTML = '';
   allResults = [];
 
-  // ── Collect metric keys (same for all locations) ───────────────
+  // ── Metric keys ───────────────────────────────────────────────
   const hKeys = useH ? [...checkedHourly] : [];
   const dKeys = useD ? [...checkedDaily]  : [];
 
-  // ── Build CSV in chunks, stream into a growing string array ────
-  // Using array of strings then join once at the end — avoids
-  // string concatenation reallocation overhead
-  const hLines = []; // hourly CSV lines
-  const dLines = []; // daily CSV lines
+  const hHeader = ['location','date',...hKeys.map(k=>{const d=HOURLY_METRICS.find(m=>m.id===k);return d?d.label+' ('+d.unit+')':k;})];
+  const dHeader = ['location','date',...dKeys.map(k=>{const d=DAILY_METRICS.find(m=>m.id===k); return d?d.label+' ('+d.unit+')':k;})];
 
-  const hHeader = ['location','date',...hKeys.map(k=>{const d=HOURLY_METRICS.find(m=>m.id===k);return d?`${d.label} (${d.unit})`:k;})].join(',');
-  const dHeader = ['location','date',...dKeys.map(k=>{const d=DAILY_METRICS.find(m=>m.id===k); return d?`${d.label} (${d.unit})`:k;})].join(',');
+  // ── Sheet manager: flush when row count hits 1M, never mid-location ──
+  const ROW_LIMIT = 1_000_000;
+  const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-  if (hKeys.length) hLines.push(hHeader);
-  if (dKeys.length) dLines.push(dHeader);
+  // One manager per data type
+  const makeSheetMgr = (header, typeName) => {
+    let rows   = [header]; // current sheet rows (includes header)
+    let fileNo = 1;
+    let total  = 0;
 
-  const csvEsc = v => {
-    if (v === null || v === undefined) return '';
-    const s = String(v);
-    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;
+    const flush = async (isFinal) => {
+      if (rows.length <= 1) return; // nothing to write
+      const label = `${typeName} file ${fileNo}`;
+      document.getElementById('spinnerText').textContent = 'Writing ' + label + '...';
+      await new Promise(r => setTimeout(r, 20));
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, typeName + '_data');
+      const buf  = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+      const blob = new Blob([buf], {type: MIME});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const suffix = isFinal && fileNo === 1 ? '' : '_part' + fileNo;
+      a.href = url;
+      a.download = 'weather_' + typeName + suffix + '_' + start + '_' + end + '.xlsx';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 3000);
+      await new Promise(r => setTimeout(r, 600));
+      fileNo++;
+      rows = [header]; // reset with header
+    };
+
+    return {
+      // Check before adding a location: if already >= ROW_LIMIT, flush first
+      async beforeLocation(locRowCount) {
+        if (rows.length - 1 >= ROW_LIMIT) {
+          await flush(false);
+        }
+      },
+      addRows(locRows) {
+        for (const r of locRows) rows.push(r);
+        total += locRows.length;
+      },
+      async done() { await flush(true); },
+      get count() { return total; }
+    };
   };
+
+  const hMgr = hKeys.length ? makeSheetMgr(hHeader, 'hourly') : null;
+  const dMgr = dKeys.length ? makeSheetMgr(dHeader, 'daily')  : null;
 
   const errors = [];
   let exportedCount = 0;
@@ -792,8 +828,8 @@ async function fetchAllData() {
     const pct = Math.round((i/locs.length)*100);
     document.getElementById('progressFill').style.width = pct+'%';
     document.getElementById('progressPct').textContent  = pct+'%';
-    document.getElementById('progressLabel').textContent = `${i+1}/${locs.length}: ${loc.name}`;
-    document.getElementById('spinnerText').textContent   = `Fetching ${loc.name}…`;
+    document.getElementById('progressLabel').textContent = (i+1)+'/'+locs.length+': '+loc.name;
+    document.getElementById('spinnerText').textContent   = 'Fetching '+loc.name+'...';
 
     const params = new URLSearchParams({latitude:loc.lat, longitude:loc.lon, start_date:start, end_date:end, timezone:'auto'});
     if(useH) params.append('hourly', hKeys.join(','));
@@ -801,31 +837,38 @@ async function fetchAllData() {
 
     try {
       const data = await fetchWithRetry('https://archive-api.open-meteo.com/v1/archive?'+params, loc.name);
-      document.getElementById('spinnerText').textContent = `Processing ${loc.name}…`;
+      document.getElementById('spinnerText').textContent = 'Processing '+loc.name+'...';
 
-      // ── Append hourly rows ───────────────────────────────────────
-      if (data.hourly?.time?.length && hKeys.length) {
+      // ── Hourly ───────────────────────────────────────────────────
+      if (hMgr && data.hourly?.time?.length) {
         const times = data.hourly.time;
+        const locRows = [];
         for (let ri = 0; ri < times.length; ri++) {
-          const row = [csvEsc(loc.name), csvEsc(times[ri])];
-          for (const k of hKeys) { row.push(csvEsc(data.hourly[k]?.[ri])); }
-          hLines.push(row.join(','));
+          const row = [loc.name, times[ri]];
+          for (const k of hKeys) { const v = data.hourly[k]?.[ri]; row.push(v ?? ''); }
+          locRows.push(row);
         }
+        // Flush BEFORE adding if current sheet already full
+        await hMgr.beforeLocation(locRows.length);
+        hMgr.addRows(locRows);
         totalHRows += times.length;
       }
 
-      // ── Append daily rows ────────────────────────────────────────
-      if (data.daily?.time?.length && dKeys.length) {
+      // ── Daily ────────────────────────────────────────────────────
+      if (dMgr && data.daily?.time?.length) {
         const times = data.daily.time;
+        const locRows = [];
         for (let ri = 0; ri < times.length; ri++) {
-          const row = [csvEsc(loc.name), csvEsc(times[ri])];
-          for (const k of dKeys) { row.push(csvEsc(data.daily[k]?.[ri])); }
-          dLines.push(row.join(','));
+          const row = [loc.name, times[ri]];
+          for (const k of dKeys) { const v = data.daily[k]?.[ri]; row.push(v ?? ''); }
+          locRows.push(row);
         }
+        await dMgr.beforeLocation(locRows.length);
+        dMgr.addRows(locRows);
         totalDRows += times.length;
       }
 
-      // ── Store preview only (first 50 rows) ───────────────────────
+      // ── Preview only (50 rows) ───────────────────────────────────
       allResults.push({
         name:loc.name, lat:loc.lat, lon:loc.lon,
         color:LOC_COLORS[i%LOC_COLORS.length],
@@ -842,36 +885,19 @@ async function fetchAllData() {
           } : null,
         }
       });
-      // data goes out of scope here → GC can reclaim it
       exportedCount++;
       if(i < locs.length-1) await sleep(400);
 
     } catch(e) {
-      errors.push(`"${loc.name}": ${e.message}`);
+      errors.push('"'+loc.name+'": '+e.message);
     }
   }
 
-  // ── Download CSV file(s) ─────────────────────────────────────────
-  document.getElementById('spinnerText').textContent = 'Preparing download…';
-  await new Promise(r => setTimeout(r,30));
-
-  const downloadCSV = (lines, filename) => {
-    if (lines.length <= 1) return; // header only = no data
-    const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href=url; a.download=filename;
-    document.body.appendChild(a); a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },3000);
-  };
-
-  if (hLines.length > 1) {
-    downloadCSV(hLines, `weather_hourly_${start}_${end}.csv`);
-    await sleep(500);
-  }
-  if (dLines.length > 1) {
-    downloadCSV(dLines, `weather_daily_${start}_${end}.csv`);
-  }
+  // ── Flush remaining rows ──────────────────────────────────────
+  document.getElementById('spinnerText').textContent = 'Finalizing files...';
+  await new Promise(r => setTimeout(r, 30));
+  if (hMgr) await hMgr.done();
+  if (dMgr) await dMgr.done();
 
   // ── Done ─────────────────────────────────────────────────────────
   document.getElementById('progressFill').style.width = '100%';
